@@ -48,6 +48,13 @@ pub struct Cli {
     #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
+    /// Transcode every embedded texture to KTX2/UASTC + Zstd with mipmaps.
+    /// Output uses the `KHR_texture_basisu` glTF extension. Drastically
+    /// reduces VRAM in engines that transcode at load time (Bevy, three.js).
+    /// Requires `toktx` (KTX-Software) on PATH.
+    #[arg(long)]
+    pub ktx2: bool,
+
     /// Log level (off, error, warn, info, debug, trace). Default: warn.
     #[arg(short, long, default_value = "warn", value_name = "LEVEL")]
     pub verbose: String,

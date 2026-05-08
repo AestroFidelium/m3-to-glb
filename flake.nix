@@ -54,16 +54,22 @@
 
           # `.cargo/config.toml` pins clang + mold as the linker.
           # `installShellFiles` ships the zsh completions emitted by build.rs.
+          # `makeWrapper` injects `toktx` into PATH so `--ktx2` works without
+          # the user installing KTX-Software separately.
           nativeBuildInputs = [
             pkgs.clang
             pkgs.mold
             pkgs.installShellFiles
+            pkgs.makeWrapper
           ];
 
           # `build.rs` generates `completions/_m3-to-glb` next to the source.
           # Drop it into `$out/share/zsh/site-functions/` — the standard fpath.
+          # Wrap the binary so `toktx` (KTX-Software) is on PATH at runtime.
           postInstall = ''
             installShellCompletion --zsh completions/_m3-to-glb
+            wrapProgram $out/bin/m3-to-glb \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ktx-tools ]}
           '';
 
           # `nix run` shows the binary name via mainProgram.

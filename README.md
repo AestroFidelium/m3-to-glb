@@ -80,6 +80,7 @@ m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-q | -v LEVEL]
 | `-t`, `--textures`     | Directory holding `.png` / `.dds` / `.tga` textures. Walked recursively, indexed by xxh3 of the lowercase stem. |
 | `-a`, `--anims`        | Companion `.m3a` animation file. Repeatable. HotS heroes ship animations separately from the base model. |
 | `-q`, `--quiet`        | Suppress all output except errors. Conflicts with `-v`. Useful for batch scripts. |
+| `--ktx2`               | Transcode every texture to KTX2/UASTC + Zstd (with mipmaps) and emit the `KHR_texture_basisu` glTF extension. Massive VRAM savings in engines that transcode at load time (Bevy, three.js, Babylon). Requires [`toktx`](https://github.com/KhronosGroup/KTX-Software) on PATH — already bundled when running through Nix. |
 | `-v`, `--verbose`      | Log level: `off`, `error`, `warn` (default), `info`, `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
 
 By default the converter prints a single one-line summary per file
@@ -137,6 +138,16 @@ for f in *.m3; do
     m3-to-glb "$f" -t ./textures -q -o "models/${f%.m3}.glb"
 done
 ```
+
+Bevy-friendly output — KTX2/UASTC textures stay GPU-compressed at runtime:
+
+```bash
+m3-to-glb hero.m3 -t ./textures --ktx2 -a hero_anims.m3a
+```
+
+A 2048×2048 base-colour map that costs 16 MiB of VRAM as raw RGBA8
+drops to roughly 4 MiB as transcoded BC7 / ASTC. For HotS-sized scenes
+the savings can be hundreds of MiB.
 
 ### MADD texture naming
 

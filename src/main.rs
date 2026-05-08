@@ -94,7 +94,11 @@ fn main() -> Result<()> {
 
     let anim_paths: Vec<&str> = cli.anims.iter().map(|s| s.as_str()).collect();
 
-    match run_conversion(&cli.input, &output_path, texture_dir, &anim_paths) {
+    let pack_options = glb::PackOptions { ktx2: cli.ktx2 };
+
+    match run_conversion(
+        &cli.input, &output_path, texture_dir, &anim_paths, &pack_options,
+    ) {
         Ok(stats) => {
             if !cli.quiet {
                 anstream::println!(
@@ -126,10 +130,11 @@ struct ConversionStats {
 }
 
 fn run_conversion(
-    input:       &str,
-    output:      &str,
-    texture_dir: Option<&str>,
-    anim_paths:  &[&str],
+    input:        &str,
+    output:       &str,
+    texture_dir:  Option<&str>,
+    anim_paths:   &[&str],
+    pack_options: &glb::PackOptions,
 ) -> Result<ConversionStats> {
     // ── Stage 1: open input via mmap (zero-copy) ─────────────────────────────
     info!("opening {} via mmap", input);
@@ -198,8 +203,10 @@ fn run_conversion(
     // ── Stage 5: pack GLB ────────────────────────────────────────────────────
     info!("packing GLB");
     let anim_refs: Vec<&m3::M3File<'_>> = anim_files.iter().collect();
-    glb::pack_and_write(&mesh_data, &texture_map, &m3_file, &anim_refs, output)
-        .with_context(|| "GLB packing failed")?;
+    glb::pack_and_write(
+        &mesh_data, &texture_map, &m3_file, &anim_refs, output, pack_options,
+    )
+    .with_context(|| "GLB packing failed")?;
 
     Ok(ConversionStats { mesh_count, texture_count })
 }

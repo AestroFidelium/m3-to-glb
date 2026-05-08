@@ -115,6 +115,16 @@ pub fn build_json(
     j.push('{');
     j.push_str(r#""asset":{"version":"2.0","generator":"m3-to-glb"},"#);
 
+    // ── glTF extensions ──────────────────────────────────────────────────────
+    // KHR_texture_basisu is required whenever any image is KTX2 — engines
+    // that don't support the extension cannot read these textures, so we
+    // also list it under `extensionsRequired`.
+    let uses_basisu = images.iter().any(|img| img.mime_type == "image/ktx2");
+    if uses_basisu {
+        j.push_str(r#""extensionsUsed":["KHR_texture_basisu"],"#);
+        j.push_str(r#""extensionsRequired":["KHR_texture_basisu"],"#);
+    }
+
     // ── scene & nodes ─────────────────────────────────────────────────────────
     j.push_str(r#""scene":0,"scenes":[{"nodes":["#);
     for (i, root) in scene_roots.iter().enumerate() {
@@ -235,9 +245,19 @@ pub fn build_json(
     if !images.is_empty() {
         j.push_str(r#""samplers":[{"magFilter":9729,"minFilter":9986,"wrapS":10497,"wrapT":10497}],"#);
         j.push_str(r#""textures":["#);
-        for i in 0..images.len() {
+        for (i, img) in images.iter().enumerate() {
             if i > 0 { j.push(','); }
-            write!(j, r#"{{"sampler":0,"source":{}}}"#, i).unwrap();
+            if img.mime_type == "image/ktx2" {
+                // KHR_texture_basisu form: the `source` lives inside the
+                // extension. Top-level `source` is omitted.
+                write!(
+                    j,
+                    r#"{{"sampler":0,"extensions":{{"KHR_texture_basisu":{{"source":{}}}}}}}"#,
+                    i
+                ).unwrap();
+            } else {
+                write!(j, r#"{{"sampler":0,"source":{}}}"#, i).unwrap();
+            }
         }
         j.push_str("],");
         j.push_str(r#""images":["#);

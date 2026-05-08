@@ -24,6 +24,7 @@
 //! All data is little-endian. Chunks are 4-byte aligned.
 
 mod json_builder;
+mod ktx2;
 
 use crate::assets::TextureCache;
 use crate::m3::reader::M3File;
@@ -32,7 +33,15 @@ use crate::processor::anim::{self, Path as AnimPath, SamplerData};
 use anyhow::{Context, Result};
 use bytemuck::cast_slice;
 use std::io::Write;
-use tracing::debug;
+use tracing::{debug, warn};
+
+/// Per-conversion options that affect how textures and geometry are packed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackOptions {
+    /// Transcode every embedded texture to KTX2/UASTC and emit the
+    /// `KHR_texture_basisu` glTF extension. Requires `toktx` on PATH.
+    pub ktx2: bool,
+}
 
 // ─── Magic & type constants ──────────────────────────────────────────────────
 const GLB_MAGIC:       u32 = 0x46546C67; // "glTF"
@@ -47,8 +56,10 @@ pub fn pack_and_write(
     m3:           &M3File<'_>,
     anim_sources: &[&M3File<'_>],
     output_path:  &str,
+    options:      &PackOptions,
 ) -> Result<()> {
-    let (json_bytes, bin_bytes) = build_glb_content(meshes, textures, m3, anim_sources)?;
+    let (json_bytes, bin_bytes) =
+        build_glb_content(meshes, textures, m3, anim_sources, options)?;
 
     // Align JSON to 4 bytes (padding = 0x20 spaces).
     let json_padded = align4_json(&json_bytes);
@@ -123,6 +134,7 @@ fn build_glb_content(
     textures:     &TextureCache,
     m3:           &M3File<'_>,
     anim_sources: &[&M3File<'_>],
+    options:      &PackOptions,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut bin_buf: Vec<u8> = Vec::new();
 
@@ -152,6 +164,7 @@ fn build_glb_content(
     // `matref_remap[matm_idx]` → glTF material index (after compaction).
     let mut matref_remap: Vec<Option<usize>> = vec![None; matm_list.len()];
 
+    let want_ktx2 = options.ktx2;
     let mut load_image = |path: &str,
                           buffer_views: &mut Vec<json_builder::BufferView>,
                           bin_buf: &mut Vec<u8>,
@@ -159,22 +172,53 @@ fn build_glb_content(
      -> Option<usize> {
         if path.is_empty() || textures.is_empty() { return None; }
         let (tex_path, mime) = textures.find_with_mime(path)?;
-        match std::fs::read(tex_path) {
-            Ok(bytes) => {
-                debug!("loading texture {:?} ({} bytes)", tex_path, bytes.len());
-                let bv_idx = push_buffer_view(buffer_views, bin_buf, &bytes, None);
-                let img_idx = images_json.len();
-                images_json.push(json_builder::GltfImage {
-                    buffer_view: bv_idx,
-                    mime_type:   mime.to_owned(),
-                });
-                Some(img_idx)
+
+        // Try KTX2 transcode first when requested. On failure (toktx missing,
+        // unsupported source format, etc.) fall back to the original bytes.
+        let (bytes, final_mime): (Vec<u8>, String) = if want_ktx2 {
+            match ktx2::transcode(tex_path) {
+                Ok(b) => {
+                    debug!(
+                        "transcoded {:?} → KTX2/UASTC ({} bytes)",
+                        tex_path,
+                        b.len()
+                    );
+                    (b, "image/ktx2".to_owned())
+                }
+                Err(e) => {
+                    warn!(
+                        "KTX2 transcode failed for {:?}: {} — embedding original",
+                        tex_path, e
+                    );
+                    match std::fs::read(tex_path) {
+                        Ok(b) => (b, mime.to_owned()),
+                        Err(e2) => {
+                            debug!("failed to read texture {:?}: {}", tex_path, e2);
+                            return None;
+                        }
+                    }
+                }
             }
-            Err(e) => {
-                debug!("failed to read texture {:?}: {}", tex_path, e);
-                None
+        } else {
+            match std::fs::read(tex_path) {
+                Ok(b) => {
+                    debug!("loading texture {:?} ({} bytes)", tex_path, b.len());
+                    (b, mime.to_owned())
+                }
+                Err(e) => {
+                    debug!("failed to read texture {:?}: {}", tex_path, e);
+                    return None;
+                }
             }
-        }
+        };
+
+        let bv_idx = push_buffer_view(buffer_views, bin_buf, &bytes, None);
+        let img_idx = images_json.len();
+        images_json.push(json_builder::GltfImage {
+            buffer_view: bv_idx,
+            mime_type:   final_mime,
+        });
+        Some(img_idx)
     };
 
     for (matm_idx, matm) in matm_list.iter().enumerate() {
