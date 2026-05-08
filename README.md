@@ -80,7 +80,7 @@ m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-q | -v LEVEL]
 | `-t`, `--textures`     | Directory holding `.png` / `.dds` / `.tga` textures. Walked recursively, indexed by xxh3 of the lowercase stem. |
 | `-a`, `--anims`        | Companion `.m3a` animation file. Repeatable. HotS heroes ship animations separately from the base model. |
 | `-q`, `--quiet`        | Suppress all output except errors. Conflicts with `-v`. Useful for batch scripts. |
-| `--ktx2`               | Transcode every texture to KTX2 (with mipmaps) and emit the `KHR_texture_basisu` glTF extension. Encoder is picked per material slot: baseColor / emissive → ETC1S/BasisLZ (compact, lossy hue), normal / occlusion / data channels → UASTC + Zstd, OETF tagged `linear`. Massive VRAM savings in engines that transcode at load time (Bevy, three.js, Babylon). Requires [`toktx`](https://github.com/KhronosGroup/KTX-Software) on PATH — already bundled when running through Nix. |
+| `--ktx2`               | Transcode every texture to KTX2/UASTC + Zstd (with mipmaps) and emit the `KHR_texture_basisu` glTF extension. OETF is tagged per material slot: `sRGB` for baseColor / emissive, `linear` for normal / occlusion / data channels. Massive VRAM savings in engines that transcode at load time (Bevy, three.js, Babylon). Requires [`toktx`](https://github.com/KhronosGroup/KTX-Software) on PATH — already bundled when running through Nix. |
 | `--bevy-compat`        | **Non-spec workaround for Bevy 0.17.** Requires `--ktx2`. Drops the `KHR_texture_basisu` extension declaration and references KTX2 images via the standard `texture.source` field with `mimeType: "image/ktx2"`. Bevy's `bevy_image` (with `ktx2` + `basis-universal` features) decodes by MIME type, but only when the extension is absent. The output is **not valid glTF** — Blender, three.js and the Khronos validator will reject it. Do not use for anything other than a Bevy 0.17.x target. |
 | `--max-tex-size <PX>`  | Cap each embedded texture so its largest dimension does not exceed `PX` pixels (aspect-preserving Lanczos3 resize). Applied before encoding in both the `--ktx2` and the raw-embed paths. Default `0` = no resize. Useful when the model sits far from camera and a 2K/4K source texture would just waste VRAM. In the raw-embed path, resized textures are re-encoded as PNG; without `--max-tex-size` source bytes are still passed through verbatim. |
 | `-v`, `--verbose`      | Log level: `off`, `error`, `warn` (default), `info`, `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
@@ -151,16 +151,20 @@ A 2048×2048 base-colour map that costs 16 MiB of VRAM as raw RGBA8
 drops to roughly 4 MiB as transcoded BC7 / ASTC. For HotS-sized scenes
 the savings can be hundreds of MiB.
 
-The two encoder modes used by `--ktx2` reflect the trade-offs of the
-underlying Basis Universal codec:
+All textures go through UASTC + Zstd. Bevy 0.17's `bevy_image` accepts
+only `None` and `Zstandard` KTX2 supercompression schemes; the more
+compact ETC1S mode lives behind `BasisLZ` supercompression which Bevy
+rejects, so UASTC is the one path that actually decodes there. UASTC
+is also nearly lossless per channel, which is what tangent-space normal
+maps need anyway.
 
-  - **ETC1S** for color (`baseColor`, `emissive`) — luma+chroma compression,
-    ~0.5 bpp, lossy on hue but visually fine for sRGB color. Has its own
-    BasisLZ supercompression — no external Zstd.
-  - **UASTC + Zstd** for data (`normal`, `occlusion`) — almost-lossless
-    per-channel precision, required for tangent-space normal maps. The
-    OETF is forced to `linear` so the GPU sampler doesn't apply gamma
-    decode at sample time (otherwise normals come out subtly wrong).
+The OETF tag is the one knob that varies by material slot:
+
+  - `baseColor` / `emissive` → `sRGB` — the GPU sampler gamma-decodes
+    at sample time, which is what color textures want.
+  - `normal` / `occlusion` / data channels → `linear` — without this
+    the sampler would gamma-decode the data and produce subtly wrong
+    tangent-space lighting.
 
 Pair it with `--max-tex-size` to cap source-texture dimensions before
 encoding — useful for top-down views where a 2K source ends up covering

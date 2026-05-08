@@ -1,31 +1,40 @@
 //! KTX2 texture transcoder.
 //!
 //! Shells out to `toktx` (KTX-Software) to encode an existing PNG/DDS/TGA/JPEG
-//! into KTX2. The encoder mode is chosen per texture role:
+//! into KTX2/UASTC + Zstd with a generated mip chain. UASTC preserves
+//! per-channel precision so it works for both color and data (normal /
+//! occlusion / metallicRoughness) textures; the Bevy 0.17 KTX2 reader
+//! (`bevy_image`) only supports `None` and `Zstandard` supercompression
+//! schemes — `BasisLZ` (the native scheme for the more compact ETC1S
+//! mode) is rejected — so UASTC + Zstd is the one path that actually
+//! decodes there.
 //!
-//!   - [`TextureRole::Color`] → ETC1S/BasisLZ. Compact (≈0.5 bpp), lossy on
-//!     hue/chroma but visually fine for sRGB color (baseColor, emissive).
-//!   - [`TextureRole::Data`]  → UASTC + Zstd, OETF tagged `linear`.
-//!     Per-channel precision is preserved (required for normal maps), and
-//!     the linear tag prevents engines from applying gamma at sample time.
+//! Per-texture role only differentiates the OETF tag:
 //!
-//! A mip chain is generated for both modes. Output is suitable for the
-//! `KHR_texture_basisu` glTF extension; engines such as Bevy or three.js
-//! transcode the basis-encoded data into the platform-native format
-//! (BC7/BC5/ASTC/ETC2) at load time, keeping the texture compressed in VRAM.
+//!   - [`TextureRole::Color`] → UASTC + Zstd, OETF `sRGB`. baseColor /
+//!     emissive — color the GPU should gamma-decode at sample time.
+//!   - [`TextureRole::Data`]  → UASTC + Zstd, OETF `linear`. Normal /
+//!     occlusion / metallicRoughness — raw linear values; no gamma
+//!     decode at sample time (which would otherwise corrupt the data).
+//!
+//! Output is suitable for the `KHR_texture_basisu` glTF extension;
+//! engines such as Bevy or three.js transcode the basis-encoded data
+//! into the platform-native format (BC7/BC5/ASTC/ETC2) at load time,
+//! keeping the texture compressed in VRAM.
 
 use anyhow::{Context, Result, anyhow, bail};
 use image::DynamicImage;
 use std::path::Path;
 use std::process::Command;
 
-/// Role a texture plays in the material — drives encoder selection.
+/// Role a texture plays in the material — drives the OETF tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureRole {
-    /// sRGB color data (baseColor, emissive). Encoded with ETC1S.
+    /// sRGB color data (baseColor, emissive). UASTC + Zstd, OETF tagged
+    /// sRGB so the GPU sampler gamma-decodes at sample time.
     Color,
-    /// Linear data channel (normal, occlusion, metallicRoughness). Encoded
-    /// with UASTC + Zstd; OETF forced to linear.
+    /// Linear data channel (normal, occlusion, metallicRoughness).
+    /// UASTC + Zstd, OETF tagged linear.
     Data,
 }
 
@@ -52,25 +61,22 @@ pub fn transcode(input_path: &Path, opts: &EncodeOptions) -> Result<Vec<u8>> {
         .with_context(|| format!("writing temp PNG {:?}", png_path))?;
 
     let mut cmd = Command::new("toktx");
-    cmd.arg("--t2").arg("--genmipmap");
-    match opts.role {
-        TextureRole::Color => {
-            // ETC1S/BasisLZ has its own internal supercompression — passing
-            // `--zcmp` on top is both unnecessary and rejected by toktx.
-            // OETF stays at toktx's default (sRGB for PNG input), which is
-            // exactly what color textures want.
-            cmd.args(["--encode", "etc1s"]);
-        }
-        TextureRole::Data => {
-            cmd.args(["--encode", "uastc"]);
-            cmd.args(["--uastc_quality", "2"]);
-            cmd.args(["--zcmp", "18"]);
-            // Without this, toktx tags PNG inputs as sRGB; the GPU sampler
-            // would then apply gamma decode on normal-map samples and
-            // produce subtly wrong tangent-space lighting.
-            cmd.args(["--assign_oetf", "linear"]);
-        }
-    }
+    cmd.arg("--t2");
+    cmd.arg("--genmipmap");
+    cmd.args(["--encode", "uastc"]);
+    cmd.args(["--uastc_quality", "2"]);
+    // Zstd supercompression on the mip levels. Bevy 0.17's bevy_image
+    // accepts `None` and `Zstandard` only; BasisLZ (the native scheme
+    // for ETC1S) is rejected — see bevy_image/src/ktx2.rs.
+    cmd.args(["--zcmp", "18"]);
+    // OETF is the one knob that differs by role. toktx defaults to sRGB
+    // on PNG input; without forcing linear for normal / occlusion the
+    // GPU sampler would gamma-decode the data and produce wrong values.
+    let oetf = match opts.role {
+        TextureRole::Color => "srgb",
+        TextureRole::Data  => "linear",
+    };
+    cmd.args(["--assign_oetf", oetf]);
     cmd.arg(&ktx2_path).arg(&png_path);
 
     let status = cmd

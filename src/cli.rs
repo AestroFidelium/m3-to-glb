@@ -48,12 +48,12 @@ pub struct Cli {
     #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
-    /// Transcode every embedded texture to KTX2 with a mip chain. Encoder
-    /// is picked per material slot: baseColor/emissive → ETC1S/BasisLZ;
-    /// normal/occlusion → UASTC + Zstd, OETF tagged linear. Output uses
-    /// the `KHR_texture_basisu` glTF extension. Drastically reduces VRAM
-    /// in engines that transcode at load time (Bevy, three.js). Requires
-    /// `toktx` (KTX-Software) on PATH.
+    /// Transcode every embedded texture to KTX2/UASTC + Zstd with a mip
+    /// chain. OETF is tagged per material slot: sRGB for baseColor /
+    /// emissive, linear for normal / occlusion / data channels. Output
+    /// uses the `KHR_texture_basisu` glTF extension. Drastically reduces
+    /// VRAM in engines that transcode at load time (Bevy, three.js).
+    /// Requires `toktx` (KTX-Software) on PATH.
     #[arg(long)]
     pub ktx2: bool,
 
