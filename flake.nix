@@ -53,10 +53,18 @@
           cargoLock.lockFile = ./Cargo.lock;
 
           # `.cargo/config.toml` требует clang + mold как линковщик.
+          # `installShellFiles` — для установки zsh-подсказок из build.rs.
           nativeBuildInputs = [
             pkgs.clang
             pkgs.mold
+            pkgs.installShellFiles
           ];
+
+          # `build.rs` генерирует `completions/_m3-to-glb` рядом с исходниками.
+          # Кладём в `$out/share/zsh/site-functions/` — стандартный fpath.
+          postInstall = ''
+            installShellCompletion --zsh completions/_m3-to-glb
+          '';
 
           # `nix run` показывает имя через mainProgram.
           meta = {
