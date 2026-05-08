@@ -1,8 +1,8 @@
-/// Определение CLI и кастомных стилей для --help.
+/// CLI definition and styling for `--help`.
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, Parser};
 
-/// Кастомный стиль: жёлтые заголовки, циановые флаги, зелёные плейсхолдеры
+/// Custom style: yellow headers, cyan flags, green placeholders.
 pub fn cli_styles() -> Styles {
     Styles::styled()
         .header(AnsiColor::Yellow.on_default() | Effects::BOLD)
@@ -19,33 +19,36 @@ pub fn cli_styles() -> Styles {
     name    = "m3-to-glb",
     version,
     about   = "High-performance M3 → GLB converter",
-    long_about = "Конвертирует файлы формата M3 (StarCraft II / Heroes of the Storm) \
-                  в бинарный glTF 2.0 (GLB). Использует SIMD, rayon и zero-copy IO \
-                  для максимальной скорости.",
+    long_about = "Converts Blizzard M3 files (StarCraft II / Heroes of the Storm) \
+                  into binary glTF 2.0 (GLB). Uses SIMD, rayon and zero-copy IO \
+                  for maximum throughput.",
     styles  = cli_styles(),
     color   = ColorChoice::Auto,
 )]
 pub struct Cli {
-    /// Путь к входному файлу (.m3)
+    /// Path to the input `.m3` file
     #[arg(value_name = "INPUT")]
     pub input: String,
 
-    /// Путь к выходному файлу (.glb)
-    /// Если не указан — используется имя входного файла с расширением .glb
+    /// Output `.glb` path. Defaults to the input path with a `.glb` extension.
     #[arg(short, long, value_name = "OUTPUT")]
     pub output: Option<String>,
 
-    /// Папка с текстурами (.png / .dds)
-    /// Будет индексирована рекурсивно с xxh3-хэшированием имён
+    /// Texture directory (`.png` / `.dds` / `.tga`).
+    /// Walked recursively, indexed by xxh3 of the lowercase stem.
     #[arg(short, long, value_name = "DIR")]
     pub textures: Option<String>,
 
-    /// Файлы анимаций (.m3a) — могут быть указаны несколько раз
-    /// Кости берутся из основного .m3, ключевые кадры из этих .m3a
+    /// Companion animation files (`.m3a`) — repeatable.
+    /// Bones come from the base `.m3`, keyframes from these.
     #[arg(short = 'a', long = "anims", value_name = "M3A")]
     pub anims: Vec<String>,
 
-    /// Уровень детализации логов (off, error, warn, info, debug, trace)
-    #[arg(short, long, default_value = "info", value_name = "LEVEL")]
+    /// Quiet mode — suppress everything except errors (exit code only).
+    #[arg(short, long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Log level (off, error, warn, info, debug, trace). Default: warn.
+    #[arg(short, long, default_value = "warn", value_name = "LEVEL")]
     pub verbose: String,
 }

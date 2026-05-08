@@ -1,14 +1,14 @@
-//! m3-to-glb — высокопроизводительный конвертер формата M3 → glTF Binary (GLB).
+//! m3-to-glb — high-performance M3 → glTF Binary (GLB) converter.
 //!
-//! Архитектурные принципы:
-//!  - Data-Oriented Design: SoA для геометрии, горячие/холодные данные раздельно
-//!  - Zero-copy: memmap2 + ссылки в mmap буфер, минимум Clone/ToOwned
+//! Architectural principles:
+//!  - Data-Oriented Design: SoA geometry, hot/cold data separated
+//!  - Zero-copy: memmap2 + references into the mmap buffer, minimal Clone/ToOwned
 //!  - SIMD: wide (stable) + multiversion runtime dispatch (AVX2 / SSE4.1)
-//!  - Параллелизм: rayon для независимых мешей и текстур
-//!  - Память: mimalloc глобально + bumpalo для временных аллокаций в парсере
+//!  - Parallelism: rayon over independent meshes and textures
+//!  - Memory: mimalloc globally + bumpalo for short-lived parser allocations
 
-// ─── Глобальный аллокатор ─────────────────────────────────────────────────────
-// ВАЖНО: без этого крейт mimalloc подключён, но не используется!
+// ─── Global allocator ────────────────────────────────────────────────────────
+// IMPORTANT: without this the mimalloc crate is linked but never used.
 use mimalloc::MiMalloc;
 
 #[global_allocator]
@@ -26,7 +26,7 @@ use cli::Cli;
 use clap::Parser;
 use color_print::cformat;
 use std::io::stderr;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 fn init_tracing(verbosity: &str) {
@@ -48,17 +48,11 @@ fn init_tracing(verbosity: &str) {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    init_tracing(&cli.verbose);
+    // -q forces tracing down to errors only and silences the success print.
+    let tracing_level = if cli.quiet { "error" } else { cli.verbose.as_str() };
+    init_tracing(tracing_level);
 
-    anstream::println!(
-        "{}",
-        cformat!(
-            "<white><bold>[!]</bold></white> <magenta>Запуск конвертации:</magenta> <cyan>{}</cyan>",
-            cli.input
-        )
-    );
-
-    // Определяем выходной путь: либо явный, либо меняем расширение
+    // Output path: explicit `--output` or fall back to `<input>.glb`.
     let output_path = cli.output.clone().unwrap_or_else(|| {
         let p = std::path::Path::new(&cli.input);
         p.with_extension("glb")
@@ -66,22 +60,14 @@ fn main() -> Result<()> {
             .into_owned()
     });
 
-    if cli.output.is_none() {
-        warn!(
-            "Выходной файл не указан, использую: {}",
-            output_path
-        );
-    }
-
     let texture_dir_owned: Option<String> = if cli.textures.is_some() {
-        None // будем использовать cli.textures напрямую
+        None
     } else {
-        // Автопоиск: ищем папку рядом с моделью (та же директория)
+        // Auto-discover textures next to the model if a PNG/DDS/TGA is present.
         let model_dir = std::path::Path::new(&cli.input)
             .parent()
             .unwrap_or(std::path::Path::new("."));
         let candidate = model_dir.to_string_lossy().into_owned();
-        // Используем директорию только если там есть хоть один PNG/DDS/TGA
         let has_textures = std::fs::read_dir(&candidate)
             .ok()
             .and_then(|mut rd| {
@@ -96,7 +82,7 @@ fn main() -> Result<()> {
             })
             .is_some();
         if has_textures {
-            warn!("--textures не указан, ищу текстуры рядом с моделью: {}", candidate);
+            info!("--textures not provided; using model directory: {}", candidate);
             Some(candidate)
         } else {
             None
@@ -110,25 +96,30 @@ fn main() -> Result<()> {
 
     match run_conversion(&cli.input, &output_path, texture_dir, &anim_paths) {
         Ok(stats) => {
-            anstream::println!(
-                "{}",
-                cformat!(
-                    "<green><bold>✓ Готово!</bold></green> {} меш(ей), {} текстур → <cyan>{}</cyan>",
-                    stats.mesh_count,
-                    stats.texture_count,
-                    output_path
-                )
-            );
+            if !cli.quiet {
+                anstream::println!(
+                    "{}",
+                    cformat!(
+                        "<green><bold>✓</bold></green> {} → <cyan>{}</cyan> <dim>({} mesh{}, {} texture{})</dim>",
+                        cli.input,
+                        output_path,
+                        stats.mesh_count,
+                        if stats.mesh_count == 1 { "" } else { "es" },
+                        stats.texture_count,
+                        if stats.texture_count == 1 { "" } else { "s" },
+                    )
+                );
+            }
             Ok(())
         }
         Err(e) => {
-            error!("Ошибка конвертации: {:#}", e);
+            error!("conversion failed: {:#}", e);
             std::process::exit(1);
         }
     }
 }
 
-/// Статистика завершённой конвертации
+/// Stats returned by a successful conversion.
 struct ConversionStats {
     mesh_count:    usize,
     texture_count: usize,
@@ -140,75 +131,75 @@ fn run_conversion(
     texture_dir: Option<&str>,
     anim_paths:  &[&str],
 ) -> Result<ConversionStats> {
-    // ── Этап 1: Открываем файл через mmap (zero-copy) ────────────────────────
-    info!("Открываю файл через mmap: {}", input);
+    // ── Stage 1: open input via mmap (zero-copy) ─────────────────────────────
+    info!("opening {} via mmap", input);
     let file = std::fs::File::open(input)
-        .with_context(|| format!("Не могу открыть файл: {input}"))?;
+        .with_context(|| format!("cannot open {input}"))?;
     let mmap = unsafe { memmap2::MmapOptions::new().map(&file) }
-        .with_context(|| "Ошибка mmap")?;
+        .with_context(|| "mmap failed")?;
 
-    // mmap-ы для .m3a файлов с анимациями — храним до конца конвертации,
-    // чтобы M3File мог ссылаться на их данные.
+    // mmaps for the .m3a animation files — kept alive for the entire conversion
+    // so M3File can borrow into them.
     let anim_mmaps: Vec<memmap2::Mmap> = anim_paths
         .iter()
         .map(|p| {
-            info!("Открываю файл анимации через mmap: {}", p);
+            info!("opening animation {} via mmap", p);
             let f = std::fs::File::open(p)
-                .with_context(|| format!("Не могу открыть .m3a: {p}"))?;
+                .with_context(|| format!("cannot open .m3a: {p}"))?;
             let mm = unsafe { memmap2::MmapOptions::new().map(&f) }
-                .with_context(|| format!("Ошибка mmap для {p}"))?;
+                .with_context(|| format!("mmap failed for {p}"))?;
             Ok::<_, anyhow::Error>(mm)
         })
         .collect::<Result<_>>()?;
 
-    // ── Этап 2: Парсинг M3 ───────────────────────────────────────────────────
-    info!("Парсинг заголовков M3...");
+    // ── Stage 2: parse M3 ────────────────────────────────────────────────────
+    info!("parsing M3 headers");
     let m3_file = m3::parse(&mmap)
-        .with_context(|| "Ошибка парсинга M3")?;
+        .with_context(|| "M3 parse failed")?;
 
     let anim_files: Vec<m3::M3File<'_>> = anim_mmaps
         .iter()
         .zip(anim_paths.iter())
         .map(|(mm, p)| {
-            m3::parse(mm).with_context(|| format!("Ошибка парсинга .m3a: {p}"))
+            m3::parse(mm).with_context(|| format!(".m3a parse failed: {p}"))
         })
         .collect::<Result<_>>()?;
 
-    // Полный дамп тегов для диагностики (только при -v debug)
+    // Full tag dump for diagnostics (only at -v debug).
     m3_file.dump_tags();
 
     info!(
-        "M3: {} мешей, {} материалов, {} костей, {} файлов анимаций",
+        "M3: {} meshes, {} materials, {} bones, {} anim file(s)",
         m3_file.mesh_count(),
         m3_file.material_count(),
         m3_file.bone_count(),
         anim_files.len(),
     );
 
-    // ── Этап 3: Поиск текстур ────────────────────────────────────────────────
+    // ── Stage 3: index textures ──────────────────────────────────────────────
     let texture_map = if let Some(dir) = texture_dir {
-        info!("Индексирую текстуры из: {}", dir);
+        info!("indexing textures from {}", dir);
         assets::TextureCache::build(dir)
-            .with_context(|| "Ошибка индексирования текстур")?
+            .with_context(|| "texture indexing failed")?
     } else {
         assets::TextureCache::empty()
     };
 
     let texture_count = texture_map.len();
-    info!("Найдено {} текстур", texture_count);
+    info!("{} texture(s) indexed", texture_count);
 
-    // ── Этап 4: Конвертация геометрии (SoA + SIMD + rayon) ──────────────────
-    info!("Конвертирую геометрию...");
+    // ── Stage 4: convert geometry (SoA + SIMD + rayon) ──────────────────────
+    info!("converting geometry");
     let mesh_data = processor::convert_all_meshes(&m3_file)
-        .with_context(|| "Ошибка конвертации геометрии")?;
+        .with_context(|| "geometry conversion failed")?;
 
     let mesh_count = mesh_data.len();
 
-    // ── Этап 5: Сборка GLB ───────────────────────────────────────────────────
-    info!("Собираю GLB...");
+    // ── Stage 5: pack GLB ────────────────────────────────────────────────────
+    info!("packing GLB");
     let anim_refs: Vec<&m3::M3File<'_>> = anim_files.iter().collect();
     glb::pack_and_write(&mesh_data, &texture_map, &m3_file, &anim_refs, output)
-        .with_context(|| "Ошибка сборки GLB")?;
+        .with_context(|| "GLB packing failed")?;
 
     Ok(ConversionStats { mesh_count, texture_count })
 }

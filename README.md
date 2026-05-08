@@ -70,16 +70,21 @@ nix develop
 ## Usage
 
 ```bash
-m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-v LEVEL]
+m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-q | -v LEVEL]
 ```
 
 | Flag                   | Meaning                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------- |
 | `INPUT`                | Path to the `.m3` file. Required.                                               |
 | `-o`, `--output`       | Output `.glb` path. Defaults to `INPUT` with a `.glb` extension.                |
-| `-t`, `--textures`     | Directory holding `.png` / `.dds` textures. Walked recursively, indexed by xxh3 of the lowercase stem. |
+| `-t`, `--textures`     | Directory holding `.png` / `.dds` / `.tga` textures. Walked recursively, indexed by xxh3 of the lowercase stem. |
 | `-a`, `--anims`        | Companion `.m3a` animation file. Repeatable. HotS heroes ship animations separately from the base model. |
-| `-v`, `--verbose`      | Log level: `off`, `error`, `warn`, `info` (default), `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
+| `-q`, `--quiet`        | Suppress all output except errors. Conflicts with `-v`. Useful for batch scripts. |
+| `-v`, `--verbose`      | Log level: `off`, `error`, `warn` (default), `info`, `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
+
+By default the converter prints a single one-line summary per file
+on success (or the error on failure). Pass `-v info` for the
+stage-by-stage trace, or `-q` for fully silent batch runs.
 
 ### Examples
 
@@ -123,6 +128,14 @@ Verbose tracing of the parse / convert / pack pipeline:
 cargo run --release -- model.m3 -t ./textures -v debug
 # equivalently:
 RUST_LOG=debug cargo run --release -- model.m3 -t ./textures
+```
+
+Batch conversion — silent except on error:
+
+```bash
+for f in *.m3; do
+    m3-to-glb "$f" -t ./textures -q -o "models/${f%.m3}.glb"
+done
 ```
 
 ### MADD texture naming
