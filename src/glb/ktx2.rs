@@ -9,13 +9,16 @@
 //! mode) is rejected — so UASTC + Zstd is the one path that actually
 //! decodes there.
 //!
-//! Per-texture role only differentiates the OETF tag:
+//! Per-texture role drives the OETF tag, and for normal maps it also
+//! triggers a channel unswizzle (HotS source files use a Blizzard
+//! variant of DXT5nm with X in alpha, Y in green, R/B unused — see
+//! [`unpack_blizzard_normal`]):
 //!
-//!   - [`TextureRole::Color`] → UASTC + Zstd, OETF `sRGB`. baseColor /
-//!     emissive — color the GPU should gamma-decode at sample time.
-//!   - [`TextureRole::Data`]  → UASTC + Zstd, OETF `linear`. Normal /
-//!     occlusion / metallicRoughness — raw linear values; no gamma
-//!     decode at sample time (which would otherwise corrupt the data).
+//!   - [`TextureRole::Color`]     → UASTC + Zstd, OETF `sRGB`.
+//!   - [`TextureRole::NormalMap`] → UASTC + Zstd, OETF `linear`,
+//!     channels rewritten to standard glTF layout (R=X, G=Y, B=Z=√(1-X²-Y²)).
+//!   - [`TextureRole::Data`]      → UASTC + Zstd, OETF `linear`,
+//!     channels untouched (occlusion, metallicRoughness, etc.).
 //!
 //! Output is suitable for the `KHR_texture_basisu` glTF extension;
 //! engines such as Bevy or three.js transcode the basis-encoded data
@@ -27,14 +30,20 @@ use image::DynamicImage;
 use std::path::Path;
 use std::process::Command;
 
-/// Role a texture plays in the material — drives the OETF tag.
+/// Role a texture plays in the material — drives the OETF tag and (for
+/// normal maps) the channel unswizzle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureRole {
     /// sRGB color data (baseColor, emissive). UASTC + Zstd, OETF tagged
     /// sRGB so the GPU sampler gamma-decodes at sample time.
     Color,
-    /// Linear data channel (normal, occlusion, metallicRoughness).
-    /// UASTC + Zstd, OETF tagged linear.
+    /// Tangent-space normal map. UASTC + Zstd, OETF tagged linear, and
+    /// channels are unswizzled from Blizzard's DXT5nm variant
+    /// (R=unused, G=Y, B=unused, A=X) into standard glTF layout
+    /// (R=X, G=Y, B=Z reconstructed) before encoding.
+    NormalMap,
+    /// Other linear data channels (occlusion, metallicRoughness, …).
+    /// UASTC + Zstd, OETF tagged linear, channels untouched.
     Data,
 }
 
@@ -53,9 +62,15 @@ pub fn transcode(input_path: &Path, opts: &EncodeOptions) -> Result<Vec<u8>> {
     let png_path  = tmp.path().join("input.png");
     let ktx2_path = tmp.path().join("output.ktx2");
 
-    // Decode → optional resize → re-encode as PNG (toktx ingests PNG/JPEG/EXR).
+    // Decode → optional Blizzard normal unswizzle → optional resize →
+    // re-encode as PNG (toktx ingests PNG/JPEG/EXR).
     let img = image::open(input_path)
         .with_context(|| format!("decoding source texture {:?}", input_path))?;
+    let img = if opts.role == TextureRole::NormalMap {
+        unpack_blizzard_normal(img)
+    } else {
+        img
+    };
     let img = maybe_downscale(img, opts.max_dim);
     img.save_with_format(&png_path, image::ImageFormat::Png)
         .with_context(|| format!("writing temp PNG {:?}", png_path))?;
@@ -74,7 +89,7 @@ pub fn transcode(input_path: &Path, opts: &EncodeOptions) -> Result<Vec<u8>> {
     // GPU sampler would gamma-decode the data and produce wrong values.
     let oetf = match opts.role {
         TextureRole::Color => "srgb",
-        TextureRole::Data  => "linear",
+        TextureRole::NormalMap | TextureRole::Data => "linear",
     };
     cmd.args(["--assign_oetf", oetf]);
     cmd.arg(&ktx2_path).arg(&png_path);
@@ -101,19 +116,26 @@ pub fn transcode(input_path: &Path, opts: &EncodeOptions) -> Result<Vec<u8>> {
         .with_context(|| format!("reading toktx output {:?}", ktx2_path))
 }
 
-/// Read a texture file, optionally downscaling it to `max_dim`.
-/// Used by the non-KTX2 embedding path (raw PNG/DDS/TGA in the GLB buffer).
+/// Read a texture file for the non-KTX2 embedding path.
 ///
-/// When no resize is needed (or `max_dim == 0`), the file is returned
-/// byte-for-byte and the original MIME is preserved. When a resize is
-/// applied, the image is decoded, resized (Lanczos3) and re-encoded as
-/// PNG; the returned MIME switches to `image/png`.
+/// For `Color` and `Data` roles: when no resize is needed (or `max_dim
+/// == 0`), the source bytes are returned byte-for-byte with the
+/// original MIME preserved; otherwise decode → Lanczos3 → re-encode as
+/// PNG (MIME switches to `image/png`).
+///
+/// For `NormalMap` role the source can never pass through unchanged —
+/// HotS DDS/PNG normal maps store X in alpha and reserve R/B for other
+/// data, so they must always be decoded and unswizzled into standard
+/// glTF layout before being embedded.
 pub fn read_with_optional_downscale(
     input_path: &Path,
+    role:       TextureRole,
     max_dim:    u32,
     src_mime:   &str,
 ) -> Result<(Vec<u8>, String)> {
-    if max_dim == 0 {
+    let needs_decode = role == TextureRole::NormalMap;
+
+    if !needs_decode && max_dim == 0 {
         let bytes = std::fs::read(input_path)
             .with_context(|| format!("reading texture {:?}", input_path))?;
         return Ok((bytes, src_mime.to_owned()));
@@ -121,17 +143,59 @@ pub fn read_with_optional_downscale(
 
     let img = image::open(input_path)
         .with_context(|| format!("decoding source texture {:?}", input_path))?;
-    if img.width().max(img.height()) <= max_dim {
+
+    if !needs_decode && img.width().max(img.height()) <= max_dim {
         let bytes = std::fs::read(input_path)
             .with_context(|| format!("reading texture {:?}", input_path))?;
         return Ok((bytes, src_mime.to_owned()));
     }
 
+    let img = if role == TextureRole::NormalMap {
+        unpack_blizzard_normal(img)
+    } else {
+        img
+    };
     let img = maybe_downscale(img, max_dim);
+
     let mut buf: Vec<u8> = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-        .with_context(|| "encoding resized texture as PNG")?;
+        .with_context(|| "encoding texture as PNG")?;
     Ok((buf, "image/png".to_owned()))
+}
+
+/// Convert a Blizzard-packed HotS/SC2 normal map into the standard glTF
+/// layout (R=X, G=Y, B=Z, A=255).
+///
+/// The HotS DDS/PNG convention stores tangent-space normals as
+/// `R=unused (~255), G=Y, B=unused (~0), A=X` — see `*_norm.dds` files.
+/// Reading that as a glTF normal map gives a junk vector roughly
+/// `(+1, ±0, -1)` per pixel, which produces near-zero `dot(L,N)` and a
+/// matte / unlit-looking surface.
+///
+/// Reconstruction:
+///
+/// ```text
+///   nx = A * 2 - 1                    (in [-1, 1])
+///   ny = G * 2 - 1                    (in [-1, 1])
+///   nz = sqrt(max(0, 1 - nx² - ny²))  (in [0, 1], outward)
+///   out.R = A           ((nx+1)/2 → glTF X)
+///   out.G = G           ((ny+1)/2 → glTF Y)
+///   out.B = (nz+1)/2 * 255            (glTF Z, always in [127, 255])
+///   out.A = 255
+/// ```
+fn unpack_blizzard_normal(img: DynamicImage) -> DynamicImage {
+    let mut rgba = img.into_rgba8();
+    for px in rgba.pixels_mut() {
+        let a = px.0[3];
+        let g = px.0[1];
+        let nx = (a as f32) / 127.5 - 1.0;
+        let ny = (g as f32) / 127.5 - 1.0;
+        let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+        // ((nz + 1) / 2) * 255 — encoded outward Z, always >= 127.
+        let b = ((nz + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+        px.0 = [a, g, b, 255];
+    }
+    DynamicImage::ImageRgba8(rgba)
 }
 
 fn maybe_downscale(img: DynamicImage, max_dim: u32) -> DynamicImage {

@@ -203,7 +203,7 @@ fn build_glb_content(
                         "KTX2 transcode failed for {:?}: {} — embedding original",
                         tex_path, e
                     );
-                    match ktx2::read_with_optional_downscale(tex_path, max_tex_size, mime) {
+                    match ktx2::read_with_optional_downscale(tex_path, role, max_tex_size, mime) {
                         Ok(t) => t,
                         Err(e2) => {
                             debug!("failed to read texture {:?}: {}", tex_path, e2);
@@ -213,7 +213,7 @@ fn build_glb_content(
                 }
             }
         } else {
-            match ktx2::read_with_optional_downscale(tex_path, max_tex_size, mime) {
+            match ktx2::read_with_optional_downscale(tex_path, role, max_tex_size, mime) {
                 Ok((b, m)) => {
                     debug!("loading texture {:?} ({} bytes, mime={})", tex_path, b.len(), m);
                     (b, m)
@@ -249,7 +249,7 @@ fn build_glb_content(
                 );
                 let normal_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "norm").unwrap_or_default(),
-                    ktx2::TextureRole::Data,
+                    ktx2::TextureRole::NormalMap,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
                 let emissive_tex = load_image(
@@ -314,7 +314,7 @@ fn build_glb_content(
                                 &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         Some(MaddSlot::Norm) if norm.is_none() => {
-                            norm = load_image(p, ktx2::TextureRole::Data,
+                            norm = load_image(p, ktx2::TextureRole::NormalMap,
                                 &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         Some(MaddSlot::Emis) if emis.is_none() => {
