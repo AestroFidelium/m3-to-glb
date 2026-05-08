@@ -37,8 +37,48 @@
           ];
         };
 
+        # Минимальный nightly для воспроизводимой сборки пакета
+        # (без cranelift / llvm-tools — они не нужны для release).
+        rustBuild = pkgs.rust-bin.nightly.latest.default;
+
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustBuild;
+          rustc = rustBuild;
+        };
+
+        m3-to-glb = rustPlatform.buildRustPackage {
+          pname = "m3-to-glb";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSource ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+
+          # `.cargo/config.toml` требует clang + mold как линковщик.
+          nativeBuildInputs = [
+            pkgs.clang
+            pkgs.mold
+          ];
+
+          # `nix run` показывает имя через mainProgram.
+          meta = {
+            description = "Fast Rust converter from Blizzard M3 (StarCraft II / Heroes of the Storm) to glTF 2.0 Binary";
+            homepage = "https://github.com/AestroFidelium/m3-to-glb";
+            license = pkgs.lib.licenses.gpl2Only;
+            mainProgram = "m3-to-glb";
+            platforms = pkgs.lib.platforms.unix;
+          };
+        };
+
       in
       {
+        packages.default = m3-to-glb;
+        packages.m3-to-glb = m3-to-glb;
+
+        apps.default = {
+          type = "app";
+          program = "${m3-to-glb}/bin/m3-to-glb";
+        };
+        apps.m3-to-glb = self.apps.${system}.default;
+
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
             rustNightly # или rustStable если не нужен nightly

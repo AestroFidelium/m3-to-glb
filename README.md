@@ -32,6 +32,41 @@ cargo build --release
 Release profile uses fat LTO, single codegen unit, `mimalloc`,
 `panic = "abort"` and stripped symbols.
 
+## Run with Nix
+
+The flake exposes both a runnable app and a buildable package, so you
+can use the converter without cloning the repo or installing Rust at
+all — flakes must be enabled in your Nix config (`experimental-features
+= nix-command flakes`).
+
+One-off run, fetched and built on demand:
+
+```bash
+nix run github:AestroFidelium/m3-to-glb -- model.m3 -t /path/to/textures
+nix run github:AestroFidelium/m3-to-glb -- hero.m3 -a hero_anims.m3a -t ./textures
+```
+
+Build the binary into `./result/bin/m3-to-glb`:
+
+```bash
+nix build github:AestroFidelium/m3-to-glb
+./result/bin/m3-to-glb model.m3 -t ./textures
+```
+
+Install into your user profile:
+
+```bash
+nix profile install github:AestroFidelium/m3-to-glb
+m3-to-glb model.m3 -t ./textures
+```
+
+Drop into a development shell with nightly Rust, mold, cranelift and
+the cargo profiling tools:
+
+```bash
+nix develop
+```
+
 ## Usage
 
 ```bash
@@ -152,4 +187,7 @@ those credits forward.
 
 ## License
 
-TBD.
+**GPL-2.0-only** — see [`LICENSE`](LICENSE).
+
+This matches the licence of `m3studio` and `m3addon`, the projects
+that supplied the format knowledge this converter is built on.

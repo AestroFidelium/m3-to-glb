@@ -2,6 +2,9 @@
 name = "m3-to-glb"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-2.0-only"
+description = "Fast Rust converter from Blizzard M3 (StarCraft II / Heroes of the Storm) to glTF 2.0 Binary."
+repository = "https://github.com/AestroFidelium/m3-to-glb"
 
 [dependencies]
 anyhow = "1"
