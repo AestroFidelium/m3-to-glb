@@ -55,6 +55,15 @@ pub struct Cli {
     #[arg(long)]
     pub ktx2: bool,
 
+    /// Non-spec workaround for Bevy 0.17: when used with `--ktx2`, emit KTX2
+    /// images via standard `texture.source` + `mimeType:"image/ktx2"` instead
+    /// of the `KHR_texture_basisu` extension. Bevy's `bevy_image` decodes the
+    /// KTX2 by MIME type, but only when the extension is absent. The output
+    /// is NOT a valid glTF — Blender, three.js and the Khronos validator
+    /// will reject it. Use only when targeting Bevy 0.17.x.
+    #[arg(long, requires = "ktx2")]
+    pub bevy_compat: bool,
+
     /// Log level (off, error, warn, info, debug, trace). Default: warn.
     #[arg(short, long, default_value = "warn", value_name = "LEVEL")]
     pub verbose: String,

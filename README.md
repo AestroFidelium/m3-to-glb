@@ -81,6 +81,7 @@ m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-q | -v LEVEL]
 | `-a`, `--anims`        | Companion `.m3a` animation file. Repeatable. HotS heroes ship animations separately from the base model. |
 | `-q`, `--quiet`        | Suppress all output except errors. Conflicts with `-v`. Useful for batch scripts. |
 | `--ktx2`               | Transcode every texture to KTX2/UASTC + Zstd (with mipmaps) and emit the `KHR_texture_basisu` glTF extension. Massive VRAM savings in engines that transcode at load time (Bevy, three.js, Babylon). Requires [`toktx`](https://github.com/KhronosGroup/KTX-Software) on PATH — already bundled when running through Nix. |
+| `--bevy-compat`        | **Non-spec workaround for Bevy 0.17.** Requires `--ktx2`. Drops the `KHR_texture_basisu` extension declaration and references KTX2 images via the standard `texture.source` field with `mimeType: "image/ktx2"`. Bevy's `bevy_image` (with `ktx2` + `basis-universal` features) decodes by MIME type, but only when the extension is absent. The output is **not valid glTF** — Blender, three.js and the Khronos validator will reject it. Do not use for anything other than a Bevy 0.17.x target. |
 | `-v`, `--verbose`      | Log level: `off`, `error`, `warn` (default), `info`, `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
 
 By default the converter prints a single one-line summary per file
@@ -148,6 +149,20 @@ m3-to-glb hero.m3 -t ./textures --ktx2 -a hero_anims.m3a
 A 2048×2048 base-colour map that costs 16 MiB of VRAM as raw RGBA8
 drops to roughly 4 MiB as transcoded BC7 / ASTC. For HotS-sized scenes
 the savings can be hundreds of MiB.
+
+Bevy 0.17 itself ships without `KHR_texture_basisu` support
+(see [`bevy_gltf` loader](https://github.com/bevyengine/bevy/blob/v0.17.3/crates/bevy_gltf/src/loader/mod.rs)).
+For that engine specifically, add `--bevy-compat`:
+
+```bash
+m3-to-glb hero.m3 -t ./textures --ktx2 --bevy-compat -a hero_anims.m3a
+```
+
+This emits a non-canonical glTF: KTX2 bytes still ride in the buffer,
+but the texture references them through the standard `source`/`mimeType`
+path so Bevy's `bevy_image` picks them up. The file will fail any
+spec-compliant validator (Blender, three.js, glTF-Validator) — only use
+this flag when the consumer is Bevy 0.17.x.
 
 ### MADD texture naming
 

@@ -97,6 +97,14 @@ pub struct GltfAnimation {
 // ─── JSON builder ────────────────────────────────────────────────────────────
 
 /// Build the full glTF JSON manifest.
+///
+/// `bevy_compat`: when true, KTX2 images are wired through the standard
+/// `texture.source` field with `mimeType: "image/ktx2"`, and the
+/// `KHR_texture_basisu` extension is NOT declared. This is non-canonical
+/// glTF — only Bevy 0.17 accepts it (it dispatches images by MIME type via
+/// `bevy_image`, but only when the extension is absent). Every other
+/// loader / validator will reject the file. When false, the canonical
+/// `KHR_texture_basisu` extension form is emitted.
 #[allow(clippy::too_many_arguments)]
 pub fn build_json(
     meshes:       &[GltfMesh],
@@ -109,6 +117,7 @@ pub fn build_json(
     skins:        &[GltfSkin],
     scene_roots:  &[usize],
     animations:   &[GltfAnimation],
+    bevy_compat:  bool,
 ) -> String {
     let mut j = String::with_capacity(8192);
 
@@ -118,9 +127,11 @@ pub fn build_json(
     // ── glTF extensions ──────────────────────────────────────────────────────
     // KHR_texture_basisu is required whenever any image is KTX2 — engines
     // that don't support the extension cannot read these textures, so we
-    // also list it under `extensionsRequired`.
+    // also list it under `extensionsRequired`. In bevy_compat mode we
+    // deliberately omit the declaration so Bevy 0.17 falls through to its
+    // MIME-based `bevy_image` decoder.
     let uses_basisu = images.iter().any(|img| img.mime_type == "image/ktx2");
-    if uses_basisu {
+    if uses_basisu && !bevy_compat {
         j.push_str(r#""extensionsUsed":["KHR_texture_basisu"],"#);
         j.push_str(r#""extensionsRequired":["KHR_texture_basisu"],"#);
     }
@@ -247,7 +258,7 @@ pub fn build_json(
         j.push_str(r#""textures":["#);
         for (i, img) in images.iter().enumerate() {
             if i > 0 { j.push(','); }
-            if img.mime_type == "image/ktx2" {
+            if img.mime_type == "image/ktx2" && !bevy_compat {
                 // KHR_texture_basisu form: the `source` lives inside the
                 // extension. Top-level `source` is omitted.
                 write!(
@@ -256,6 +267,9 @@ pub fn build_json(
                     i
                 ).unwrap();
             } else {
+                // Canonical PNG/JPEG path AND the bevy_compat KTX2 path:
+                // standard top-level `source`. Bevy's loader picks the
+                // decoder via `image.mimeType`.
                 write!(j, r#"{{"sampler":0,"source":{}}}"#, i).unwrap();
             }
         }
@@ -421,10 +435,26 @@ mod tests {
 
     #[test]
     fn test_minimal_json_valid() {
-        let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[]);
+        let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[], false);
         assert!(json.contains(r#""asset""#));
         assert!(json.contains(r#""version":"2.0""#));
         assert!(json.contains(r#""scene":0"#));
+    }
+
+    #[test]
+    fn test_bevy_compat_omits_basisu_extension() {
+        let images = vec![GltfImage { buffer_view: 0, mime_type: "image/ktx2".into() }];
+        let bv = vec![BufferView { offset: 0, length: 16, target: None }];
+
+        let canonical = build_json(&[], &[], &bv, 16, &images, &[], &[], &[], &[], &[], false);
+        assert!(canonical.contains(r#""extensionsRequired":["KHR_texture_basisu"]"#));
+        assert!(canonical.contains(r#""KHR_texture_basisu":{"source":0}"#));
+
+        let bevy = build_json(&[], &[], &bv, 16, &images, &[], &[], &[], &[], &[], true);
+        assert!(!bevy.contains("KHR_texture_basisu"));
+        assert!(!bevy.contains("extensionsRequired"));
+        assert!(bevy.contains(r#""sampler":0,"source":0"#));
+        assert!(bevy.contains(r#""mimeType":"image/ktx2""#));
     }
 
     #[test]

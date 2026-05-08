@@ -94,7 +94,10 @@ fn main() -> Result<()> {
 
     let anim_paths: Vec<&str> = cli.anims.iter().map(|s| s.as_str()).collect();
 
-    let pack_options = glb::PackOptions { ktx2: cli.ktx2 };
+    let pack_options = glb::PackOptions {
+        ktx2:        cli.ktx2,
+        bevy_compat: cli.bevy_compat,
+    };
 
     match run_conversion(
         &cli.input, &output_path, texture_dir, &anim_paths, &pack_options,

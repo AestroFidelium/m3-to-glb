@@ -41,6 +41,10 @@ pub struct PackOptions {
     /// Transcode every embedded texture to KTX2/UASTC and emit the
     /// `KHR_texture_basisu` glTF extension. Requires `toktx` on PATH.
     pub ktx2: bool,
+    /// Non-canonical workaround for Bevy 0.17: reference KTX2 images via
+    /// `texture.source` + `mimeType:"image/ktx2"` and omit the
+    /// `KHR_texture_basisu` extension declaration. Implies `ktx2`.
+    pub bevy_compat: bool,
 }
 
 // ─── Magic & type constants ──────────────────────────────────────────────────
@@ -699,6 +703,7 @@ fn build_glb_content(
         &skins,
         &scene_roots,
         &animations_json,
+        options.bevy_compat,
     );
 
     let _ = mesh_skin_idx; // currently unused, retained for future per-mesh skin mapping
