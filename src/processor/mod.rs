@@ -241,9 +241,13 @@ fn convert_division(
             }
         }
 
-        // Tangents (VEC4: xyz + sign w).
+        // Tangents (VEC4: xyz + sign w). The bitangent sign sits in the 4th
+        // byte of the *normal* block, not the tangent block — pass the normal
+        // offset through so `decode_tangents` can read it.
         if let Some(tangent_off) = offsets.tangent {
-            transform::decode_tangents(vertex_data, first, count, stride, tangent_off, &mut soa)?;
+            transform::decode_tangents(
+                vertex_data, first, count, stride, tangent_off, offsets.normal, &mut soa,
+            )?;
         } else {
             for _ in 0..count {
                 soa.tangents_x.push(1.0);

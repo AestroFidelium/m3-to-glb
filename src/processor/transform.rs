@@ -305,14 +305,28 @@ pub fn decode_skin(
 // ─── Tangent decoding ────────────────────────────────────────────────────────
 
 /// Decode tangents from uint8x4 SNORM → f32 VEC4.
-/// Same encoding as normals: `x = b/255*2-1`, w (sign) is the 4th byte.
-/// M3 stores the tangent as `[u8;4]`; the 4th byte is the sign (128 = +1.0, 0 = -1.0).
+///
+/// The first 3 bytes of the tangent block encode `tangent.xyz` the same way
+/// as normals: `x = b/255*2-1`. The **4th byte of the tangent block is
+/// unused** (see m3studio `io_m3.py` — `M3FieldInt('unused', 'uint8')`).
+///
+/// glTF requires `tangent.w` = bitangent handedness. That value lives in
+/// the **4th byte of the NORMAL block** (`m3studio io_m3_export.py:1802-1804`):
+/// the exporter writes `m3_vert.sign = 0 if d < 0 else 255`, where `d` is
+/// the signed UV area of the face. Map back to glTF:
+///   sign byte == 0  →  tangent.w = -1.0  (UV mirrored, flip bitangent)
+///   sign byte != 0  →  tangent.w = +1.0  (standard winding)
+///
+/// `normal_offset` is the offset of the normal block inside the vertex; it
+/// is `None` when the mesh has no compressed normal (in which case we fall
+/// back to +1, since there is no face winding hint to consult).
 pub fn decode_tangents(
     vertex_data: &[u8],
     first_vertex: usize,
     vertex_count: usize,
     vertex_stride: usize,
     component_offset: usize,
+    normal_offset: Option<usize>,
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
     ensure!(
@@ -321,6 +335,14 @@ pub fn decode_tangents(
         vertex_stride,
         component_offset
     );
+    if let Some(n_off) = normal_offset {
+        ensure!(
+            vertex_stride >= n_off + 4,
+            "vertex_stride {} too small for normal sign byte (normal_off={})",
+            vertex_stride,
+            n_off
+        );
+    }
 
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride + component_offset;
@@ -329,13 +351,20 @@ pub fn decode_tangents(
         let tx_raw = vertex_data[base] as f32;
         let ty_raw = vertex_data[base + 1] as f32;
         let tz_raw = vertex_data[base + 2] as f32;
-        let tw_raw = vertex_data[base + 3] as f32;
 
         let tx = (tx_raw / 255.0) * 2.0 - 1.0;
         let ty = (ty_raw / 255.0) * 2.0 - 1.0;
         let tz = (tz_raw / 255.0) * 2.0 - 1.0;
-        // Bitangent sign: 128 → +1.0, 0 → -1.0.
-        let tw = if tw_raw >= 128.0 { 1.0f32 } else { -1.0f32 };
+
+        // Bitangent sign comes from the normal block's 4th byte, not the
+        // tangent block's (which is the "unused" field per io_m3.py).
+        let tw = match normal_offset {
+            Some(n_off) => {
+                let sign_byte = vertex_data[(first_vertex + i) * vertex_stride + n_off + 3];
+                if sign_byte == 0 { -1.0_f32 } else { 1.0_f32 }
+            }
+            None => 1.0_f32,
+        };
 
         // Normalise the xyz part.
         let len_sq = tx * tx + ty * ty + tz * tz;
