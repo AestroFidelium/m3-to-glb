@@ -1,19 +1,20 @@
-//! Zero-copy читалка M3 файла.
+//! Zero-copy M3 reader.
 //!
-//! ## Как реально устроен M3 (из дампа тегов)
+//! ## What an M3 actually looks like (from a tag dump)
 //!
-//!   tags[21] "__8U"  count=1332640  — вершинный буфер (count = байты)
+//!   tags[21] "__8U"  count=1332640  — vertex buffer (count = bytes)
 //!   tags[22] "_VID"  count=1        — DIV_  (1 Division)
-//!   tags[23] "_61U"  count=113646   — u16 индексы (count = элементы)
-//!   tags[25] "NGER"  count=3        — REGN  (3 региона)
+//!   tags[23] "_61U"  count=113646   — u16 indices (count = elements)
+//!   tags[25] "NGER"  count=3        — REGN  (3 regions)
 //!   tags[18] "ENOB"  count=2        — BONE
 //!
-//! Все имена — ASCII в little-endian u32 (байты перевёрнуты):
+//! All tag names are ASCII inside a little-endian u32 (so the bytes are
+//! reversed):
 //!   "DIV_" → b"_VID",  "REGN" → b"NGER",  "BONE" → b"ENOB"
 //!   "U8__" → b"__8U",  "U16_" → b"_61U"
 //!
-//! Мы НЕ используем ModelHeader — его layout не совпадает с реальным файлом.
-//! Вместо этого ищем теги напрямую по LE-имени.
+//! We DO NOT use `ModelHeader` — its layout doesn't match the actual file.
+//! Instead we look up tags directly by their LE name.
 
 use super::structures::{
     Bat, Bone, Div, Iref, Layr, MdIndexEntry, Quat, Reference, Regn, Schr, Sd3v, Sd4q, Seqs,
@@ -25,11 +26,11 @@ use bytemuck::cast_slice;
 use simdutf8::basic::from_utf8;
 use tracing::debug;
 
-// ─── LE-имена тегов ───────────────────────────────────────────────────────────
+// ─── LE tag names ────────────────────────────────────────────────────────────
 const TAG_DIV: &[u8; 4] = b"_VID"; // "DIV_"
 const TAG_BONE: &[u8; 4] = b"ENOB"; // "BONE"
-const TAG_VERTICES: &[u8; 4] = b"__8U"; // "U8__" — вершины (count = байты)
-const TAG_INDICES: &[u8; 4] = b"_61U"; // "U16_" — индексы u16
+const TAG_VERTICES: &[u8; 4] = b"__8U"; // "U8__" — vertices (count = bytes)
+const TAG_INDICES: &[u8; 4] = b"_61U"; // "U16_" — u16 indices
 
 const TAG_BATCHES: &[u8; 4] = b"_TAB"; // "BAT_"
 
@@ -43,7 +44,7 @@ impl<'data> M3File<'data> {
     pub fn from_bytes(data: &'data [u8]) -> Result<Self> {
         let version = detect_version(data)?;
 
-        ensure!(data.len() >= 12, "Файл слишком мал для заголовка M3");
+        ensure!(data.len() >= 12, "file too small for the M3 header");
 
         // Common header layout for all M3 versions (Md32/Md33/Md34):
         //   +0  tag(4)           magic bytes
@@ -66,7 +67,7 @@ impl<'data> M3File<'data> {
         let tags_end = index_offset + num_tags * tag_size;
         ensure!(
             data.len() >= tags_end,
-            "Файл обрезан: нет места для таблицы тегов"
+            "file truncated: tag table doesn't fit"
         );
 
         let tags: &[MdIndexEntry] = cast_slice(&data[index_offset..tags_end]);
@@ -78,15 +79,15 @@ impl<'data> M3File<'data> {
         })
     }
 
-    // ── Статистика ──────────────────────────────────────────────────────────
+    // ── Statistics ──────────────────────────────────────────────────────────
 
     pub fn mesh_count(&self) -> usize {
-        // Количество REGN тегов = количество регионов (sub-meshes)
+        // Number of REGN tags = number of regions (sub-meshes).
         self.tags.iter().filter(|t| t.tag_bytes() == *b"NGER").count()
     }
 
     pub fn material_count(&self) -> usize {
-        // Количество MAT_ материалов — repetitions элементов в теге _TAM
+        // MAT_ count = repetitions of elements in the _TAM tag.
         self.tags
             .iter()
             .find(|t| t.tag_bytes() == *b"_TAM")
@@ -94,8 +95,8 @@ impl<'data> M3File<'data> {
             .unwrap_or(0)
     }
 
-    /// Количество MADD-материалов (тег "DDAM"). MADD — node-based материалы,
-    /// используемые более новыми моделями HotS (Tracer и др.).
+    /// Number of MADD materials (tag "DDAM"). MADD is a node-based material
+    /// system used by newer HotS models (Tracer etc.).
     pub fn madd_count(&self) -> usize {
         self.tags
             .iter()
@@ -104,24 +105,24 @@ impl<'data> M3File<'data> {
             .unwrap_or(0)
     }
 
-    /// Список текстурных путей (CHAR-строк) для MADD по индексу `madd_idx`.
-    /// Возвращает пути в том порядке, как они хранятся в файле.
-    /// MADD не имеет явных слотов diff/norm/emis — порядок определяется только
-    /// конвенцией HotS (суффикс имени файла _diff/_norm/_emis/_spec/_ao);
-    /// см. `slot_from_filename` в glb/mod.rs.
+    /// List of texture paths (CHAR strings) for the MADD at `madd_idx`.
+    /// Returned in the order they appear in the file. MADD has no explicit
+    /// diff/norm/emis slot tags — the ordering is purely the HotS naming
+    /// convention (filename suffix `_diff` / `_norm` / `_emis` / `_spec` / `_ao`);
+    /// see `slot_from_filename` in `glb/mod.rs`.
     pub fn madd_texture_paths(&self, madd_idx: usize) -> Result<Vec<String>> {
         let Some(tag_idx) = self.find_tag(b"DDAM") else { return Ok(Vec::new()); };
         let entry = &self.tags[tag_idx];
         let version = entry.version;
 
-        // texture_paths offset внутри MADD по версии:
+        // texture_paths offset inside MADD per version:
         //   v1 (140B): name(12)+unk2(12)+unk4(12)            → +36
         //   v2 (152B): name(12)+unk2(12)+unk3(12)+unk4(12)   → +48
-        //   v3 (160B): то же что v2                          → +48
+        //   v3 (160B): same as v2                            → +48
         let (file_elem_sz, tex_paths_off) = match version {
             1 => (140usize, 36usize),
             2 => (152, 48),
-            _ => (160, 48), // v3 и неизвестные дефолтим в v3 layout
+            _ => (160, 48), // v3 and unknown versions default to v3 layout
         };
 
         if madd_idx >= entry.repetitions as usize { return Ok(Vec::new()); }
@@ -159,11 +160,11 @@ impl<'data> M3File<'data> {
             .unwrap_or(0)
     }
 
-    // ── Геометрия ───────────────────────────────────────────────────────────
+    // ── Geometry ────────────────────────────────────────────────────────────
 
-    /// Читает vertex_flags из MODL тега (тег "LDOM" в LE).
-    /// Флаги определяют состав и размер каждой вершины.
-    /// Смещение vertex_flags = 96 байт от начала MODL (из structures.xml).
+    /// Read `vertex_flags` from the MODL tag (LE name "LDOM").
+    /// The flags determine which components a vertex carries and how big it is.
+    /// Offset of `vertex_flags` within MODL is 96 bytes (per structures.xml).
     pub fn vertex_flags(&self) -> u32 {
         const VERTEX_FLAGS_OFFSET: usize = 96;
         // model_name(12) + flags(4) + sequences(12) + stc(12) + stg(12) +
@@ -225,11 +226,11 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Вычисляет stride вершины из vertex_flags согласно structures.xml.
+    /// Compute the vertex stride from `vertex_flags` per structures.xml.
     pub fn vertex_stride(&self) -> usize {
         let flags = self.vertex_flags();
         debug!("vertex_flags = 0x{:08X}", flags);
-        let mut size: usize = 12; // pos (всегда)
+        let mut size: usize = 12; // pos (always present)
 
         if flags & 0x000020 != 0 {
             size += 4;
@@ -314,14 +315,14 @@ impl<'data> M3File<'data> {
         size
     }
 
-    /// Вершинный буфер — сырые байты (tag "__8U", count = байты).
+    /// Vertex buffer — raw bytes (tag "__8U", count = bytes).
     pub fn vertex_data(&self) -> Result<&'data [u8]> {
         let idx = self
             .find_tag(TAG_VERTICES)
-            .ok_or_else(|| anyhow::anyhow!("Тег вершин '__8U' не найден"))?;
+            .ok_or_else(|| anyhow::anyhow!("vertex tag '__8U' not found"))?;
         let entry = &self.tags[idx];
         let start = entry.offset as usize;
-        let end = start + entry.repetitions as usize; // U8: repetitions = байты
+        let end = start + entry.repetitions as usize; // U8: repetitions = bytes
         ensure!(end <= self.data.len(), "vertex buffer out of bounds");
         debug!(
             "vertex_data: tag[{}] offset={} size={}",
@@ -330,16 +331,17 @@ impl<'data> M3File<'data> {
         Ok(&self.data[start..end])
     }
 
-    /// Все Division (тег "_VID", count = число элементов).
+    /// All Divisions (tag "_VID", count = element count).
     pub fn divisions(&self) -> Result<Vec<Div>> {
         let idx = self
             .find_tag(TAG_DIV)
-            .ok_or_else(|| anyhow::anyhow!("Тег '_VID' (DIV_) не найден"))?;
+            .ok_or_else(|| anyhow::anyhow!("tag '_VID' (DIV_) not found"))?;
         self.read_tag_slice::<Div>(idx)
     }
 
-    /// Регионы Division — по Reference внутри Division.
-    /// Возвращает регионы и версию тега REGN (нужна для v≤2 face fix-up в processor).
+    /// Regions of a Division — addressed via the Reference inside the Division.
+    /// Returns the regions and the REGN tag version (needed for the v≤2 face
+    /// fix-up in `processor`).
     pub fn regions(&self, div: &Div) -> Result<(Vec<Regn>, u32)> {
         if div.regions.entries == 0 {
             return Ok((Vec::new(), 0));
@@ -351,10 +353,10 @@ impl<'data> M3File<'data> {
         let version = entry.version;
         let count = div.regions.entries as usize;
 
-        // Размер Region зависит от версии тега NGER (REGN). Соответствует
-        // RegnV2..RegnV5 в structures.rs.
+        // Region size depends on the NGER (REGN) tag version. Matches
+        // RegnV2..RegnV5 in structures.rs.
         let file_elem_sz: usize = match version {
-            0 | 1 | 2 => 28, // till_v2: u16 first_vertex_index/vertex_count, без unknown01
+            0 | 1 | 2 => 28, // till_v2: u16 first_vertex_index/vertex_count, no unknown01
             3 => 36,         // +unknown01, u32 first_vertex_index/vertex_count
             4 => 40,         // +flags
             _ => 48,         // v5+: +uv_multiply, +uv_offset
@@ -402,7 +404,7 @@ impl<'data> M3File<'data> {
                 buf[..copy_len].copy_from_slice(&raw[..copy_len]);
             }
 
-            // Для v<5: uv_multiply нет в файле — ставим default 16.0; uv_offset = 0
+            // For v<5: uv_multiply isn't in the file — default to 16.0; uv_offset = 0.
             if version < 5 {
                 let default_uv_multiply: f32 = 16.0;
                 buf[40..44].copy_from_slice(&default_uv_multiply.to_le_bytes());
@@ -415,19 +417,19 @@ impl<'data> M3File<'data> {
         Ok((result, version))
     }
 
-    /// u16 индексы треугольников Division.
+    /// u16 triangle indices for a Division.
     pub fn face_indices(&self, div: &Div) -> Result<Vec<u16>> {
         self.read_ref_slice::<u16>(&div.faces)
     }
 
-    /// Batch-объекты Division (BAT_).
+    /// Batch records of a Division (BAT_).
     pub fn batches(&self, div: &Div) -> Result<Vec<Bat>> {
         self.read_ref_slice::<Bat>(&div.batches)
     }
 
-    // ── Материалы ───────────────────────────────────────────────────────────
+    // ── Materials ───────────────────────────────────────────────────────────
 
-    /// Привязки материалов (MATM, тег b"MTAM").
+    /// Material references (MATM, tag b"MTAM").
     pub fn material_references(&self) -> Result<Vec<crate::m3::structures::Matm>> {
         match self.find_tag(b"MTAM") {
             Some(idx) => self.read_tag_slice::<crate::m3::structures::Matm>(idx),
@@ -435,7 +437,7 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Смещение заданного слоя внутри MAT_ для данной версии.
+    /// Offset of the named layer inside MAT_ for the given version.
     fn mat_layer_offset(version: u32, layer: &str) -> Option<usize> {
         match version {
             15 => match layer {
@@ -472,7 +474,7 @@ impl<'data> M3File<'data> {
                 _ => None,
             },
             19 => match layer {
-                // v19: нет hdr_envi_const/diff/spec (+12), поэтому слои начинаются с +52
+                // v19: hdr_envi_const/diff/spec absent (+12), so layers start at +52.
                 "diff" => Some(52),
                 "decal" => Some(64),
                 "spec" => Some(76),
@@ -494,7 +496,7 @@ impl<'data> M3File<'data> {
                 _ => None,
             },
             20 => match layer {
-                // v20: добавляет hdr_envi_const/diff/spec (+12), слои начинаются с +64
+                // v20: adds hdr_envi_const/diff/spec (+12), so layers start at +64.
                 "diff" => Some(64),
                 "decal" => Some(76),
                 "spec" => Some(88),
@@ -525,7 +527,7 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Читает u32 поле из MAT_ по фиксированному смещению (одинаково для всех версий).
+    /// Read a u32 field from MAT_ at a fixed offset (same across all versions).
     fn mat_read_u32(&self, mat_idx: usize, field_offset: usize) -> Option<u32> {
         let tag_idx = self.find_tag(b"_TAM")?;
         let entry = &self.tags[tag_idx];
@@ -550,22 +552,22 @@ impl<'data> M3File<'data> {
         ))
     }
 
-    /// blend_mode из MAT_ (+20). 0=Opaque,1=Blend,2=Erase,3=Add,4=AddAlpha,5=Mod,6=Mod2x
+    /// `blend_mode` from MAT_ (+20). 0=Opaque,1=Blend,2=Erase,3=Add,4=AddAlpha,5=Mod,6=Mod2x.
     pub fn mat_blend_mode(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 20).unwrap_or(0)
     }
 
-    /// alpha_test_threshold из MAT_ (+40). Хранится как uint8 в первом байте u32.
+    /// `alpha_test_threshold` from MAT_ (+40). Stored as uint8 in the low byte of a u32.
     pub fn mat_alpha_threshold(&self, mat_idx: usize) -> u32 {
-        // Поле uint8, но читается как u32 LE — реальное значение в младшем байте
+        // The field is uint8 but read as a u32 LE — the real value lives in the low byte.
         let raw = self.mat_read_u32(mat_idx, 40).unwrap_or(0);
-        raw & 0xFF // берём только первый байт
+        raw & 0xFF // low byte only
     }
 
     pub fn mat_flags(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 16).unwrap_or(0)
     }
-    /// Возвращает Reference на указанный слой материала.
+    /// Reference to the named material layer.
     pub fn mat_layer_ref(&self, mat_idx: usize, layer: &str) -> Option<Reference> {
         let tag_idx = self.find_tag(b"_TAM")?;
         let entry = &self.tags[tag_idx];
@@ -619,8 +621,8 @@ impl<'data> M3File<'data> {
         })
     }
 
-    /// Читает первый Layer из тега на который указывает Reference.
-    /// Возвращает только `color_bitmap` Reference (путь к текстуре).
+    /// Read the first Layer the Reference points at.
+    /// Returns just the `color_bitmap` Reference (texture path).
     pub fn read_layer_bitmap_ref(&self, r: &Reference) -> Option<Reference> {
         if r.entries == 0 {
             return None;
@@ -634,8 +636,8 @@ impl<'data> M3File<'data> {
         let version = entry.version;
         let start = entry.offset as usize;
 
-        // color_bitmap — всегда второе поле: +4 (после id:u32)
-        // Это верно для ВСЕХ версий LAYR (v20..v26)
+        // `color_bitmap` is always the second field: +4 (after id:u32).
+        // Holds for ALL LAYR versions (v20..v26).
         let bitmap_off = start + 4;
         if bitmap_off + 12 > self.data.len() {
             return None;
@@ -657,7 +659,7 @@ impl<'data> M3File<'data> {
         })
     }
 
-    /// Путь к текстуре для заданного слоя материала mat_idx.
+    /// Texture path for the named layer of material `mat_idx`.
     pub fn texture_path_for_layer(&self, mat_idx: usize, layer: &str) -> Result<String> {
         let layer_ref = match self.mat_layer_ref(mat_idx, layer) {
             Some(r) => r,
@@ -682,21 +684,19 @@ impl<'data> M3File<'data> {
         Ok(s.to_owned())
     }
 
-    /// Возвращает Reference на layer_diff для материала с индексом mat_idx.
-    /// Для обратной совместимости.
+    /// Reference to layer_diff for material `mat_idx`. Backwards-compat helper.
     pub fn mat_layer_diff_ref(&self, mat_idx: usize) -> Option<Reference> {
         self.mat_layer_ref(mat_idx, "diff")
     }
 
-    /// Путь к диффузной текстуре для материала mat_idx.
-    /// Для обратной совместимости.
+    /// Diffuse texture path for material `mat_idx`. Backwards-compat helper.
     pub fn diffuse_texture_path(&self, mat_idx: usize) -> Result<String> {
         self.texture_path_for_layer(mat_idx, "diff")
     }
 
-    /// Читает uv_tiling.default из Layer по Reference.
+    /// Read `uv_tiling.default` from a Layer pointed at by the Reference.
     /// Vec2AnimRef: header(8) + default_x(4) + default_y(4) + ...
-    /// Возвращает (tiling_x, tiling_y), по умолчанию (1.0, 1.0).
+    /// Returns `(tiling_x, tiling_y)`, defaulting to (1.0, 1.0).
     pub fn read_layer_uv_tiling(&self, r: &Reference) -> (f32, f32) {
         if r.entries == 0 {
             return (1.0, 1.0);
@@ -710,15 +710,15 @@ impl<'data> M3File<'data> {
         let version = entry.version;
         let start = entry.offset as usize;
 
-        // Смещение uv_tiling внутри LAYR по версии
+        // uv_tiling offset inside LAYR per version.
         let uv_tiling_off: usize = match version {
             20 | 21 | 22 => 244,
-            23 => 244,           // triplanar добавляется ПОСЛЕ color_brightness
+            23 => 244,           // triplanar is added AFTER color_brightness
             24 | 25 | 26 => 252, // +noise_amplitude(4)+noise_frequency(4)
             _ => 244,
         };
 
-        // Vec2AnimRef.default начинается на +8 (после header)
+        // Vec2AnimRef.default starts at +8 (after the header).
         let default_off = start + uv_tiling_off + 8;
         if default_off + 8 > self.data.len() {
             return (1.0, 1.0);
@@ -735,7 +735,7 @@ impl<'data> M3File<'data> {
                 .unwrap_or([0, 0, 128, 63]),
         );
 
-        // Если tiling = 0 — считаем как 1 (защита от деления на ноль)
+        // tiling = 0 → treat as 1 (defensive against div-by-zero).
         let tx = if tx.abs() < 1e-6 { 1.0 } else { tx };
         let ty = if ty.abs() < 1e-6 { 1.0 } else { ty };
 
@@ -746,7 +746,7 @@ impl<'data> M3File<'data> {
         (tx, ty)
     }
 
-    // Вспомогательный метод для backward compat
+    // Backwards-compat helper.
     pub fn read_layer(&self, r: &Reference) -> Result<Option<Layr>> {
         if r.entries == 0 {
             return Ok(None);
@@ -784,11 +784,11 @@ impl<'data> M3File<'data> {
         Ok(Some(layer))
     }
 
-    // ── Анимации (SEQS / STG_ / STC_) ───────────────────────────────────────
+    // ── Animations (SEQS / STG_ / STC_) ─────────────────────────────────────
 
-    /// MODL.sequences (offset 16) → SEQS array. Поддерживает версии v1 (96 байт)
-    /// и v2 (92 байта); v1 содержит дополнительное `unknown05: u32` поле, мы его
-    /// игнорируем при чтении.
+    /// MODL.sequences (offset 16) → SEQS array. Supports versions v1 (96 bytes)
+    /// and v2 (92 bytes); v1 carries an extra `unknown05: u32` field that we
+    /// ignore on read.
     pub fn sequences(&self) -> Result<Vec<Seqs>> {
         let r = match self.read_modl_ref(16) {
             Some(r) if r.entries > 0 => r,
@@ -843,43 +843,43 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Читает Reference на массив u32 (общий случай для anim_ids / anim_refs / stc_indices).
+    /// Read a Reference to a u32 array (anim_ids / anim_refs / stc_indices).
     pub fn read_ref_u32(&self, r: &Reference) -> Result<Vec<u32>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<u32>(r)
     }
 
-    /// Читает Reference на массив i32 (для frames в SDxx — таймштампы в ms).
+    /// Read a Reference to an i32 array (frames in SDxx — millisecond timestamps).
     pub fn read_ref_i32(&self, r: &Reference) -> Result<Vec<i32>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<i32>(r)
     }
 
-    /// Читает Reference на массив VEC3 (ключевые значения SD3V — translation/scale).
+    /// Read a Reference to a VEC3 array (SD3V key values — translation/scale).
     pub fn read_ref_vec3(&self, r: &Reference) -> Result<Vec<Vec3>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Vec3>(r)
     }
 
-    /// Читает Reference на массив QUAT (ключевые значения SD4Q — rotation).
+    /// Read a Reference to a QUAT array (SD4Q key values — rotation).
     pub fn read_ref_quat(&self, r: &Reference) -> Result<Vec<Quat>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Quat>(r)
     }
 
-    /// Читает массив SD3V блоков из STC.sd3v Reference.
+    /// Read the SD3V block array referenced by `STC.sd3v`.
     pub fn read_sd3v(&self, r: &Reference) -> Result<Vec<Sd3v>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd3v>(r)
     }
 
-    /// Читает массив SD4Q блоков из STC.sd4q Reference.
+    /// Read the SD4Q block array referenced by `STC.sd4q`.
     pub fn read_sd4q(&self, r: &Reference) -> Result<Vec<Sd4q>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd4q>(r)
     }
 
-    // ── Поиск тегов ────────────────────────────────────────────────────────
+    // ── Tag lookup ──────────────────────────────────────────────────────────
 
     pub fn find_tag(&self, tag_le: &[u8; 4]) -> Option<usize> {
         self.tags.iter().position(|t| t.tag_bytes() == *tag_le)
@@ -900,9 +900,9 @@ impl<'data> M3File<'data> {
         self.version
     }
 
-    // ── Внутренние хелперы ──────────────────────────────────────────────────
+    // ── Internal helpers ────────────────────────────────────────────────────
 
-    /// Читает все элементы тега. repetitions = число элементов типа T.
+    /// Read every element of a tag. `repetitions` is the count of T values.
     fn read_tag_slice<T: bytemuck::Pod>(&self, tag_idx: usize) -> Result<Vec<T>> {
         let entry = &self.tags[tag_idx];
         let elem_sz = std::mem::size_of::<T>();
@@ -930,7 +930,7 @@ impl<'data> M3File<'data> {
         );
         ensure!(
             byte_len % elem_sz == 0,
-            "byte_len {} не кратен elem_sz {}",
+            "byte_len {} is not a multiple of elem_sz {}",
             byte_len,
             elem_sz
         );
@@ -938,7 +938,7 @@ impl<'data> M3File<'data> {
         Ok(self.copy_aligned(&self.data[start..end]))
     }
 
-    /// Читает элементы по Reference. ref.entries = число элементов, ref.index = тег.
+    /// Read elements via Reference. `ref.entries` = element count, `ref.index` = tag index.
     fn read_ref_slice<T: bytemuck::Pod>(&self, r: &Reference) -> Result<Vec<T>> {
         if r.entries == 0 {
             return Ok(Vec::new());
@@ -955,7 +955,7 @@ impl<'data> M3File<'data> {
         let entry = &self.tags[tag_idx];
         let elem_sz = std::mem::size_of::<T>();
         let start = entry.offset as usize;
-        let byte_len = r.entries as usize * elem_sz; // entries из Reference, не repetitions тега!
+        let byte_len = r.entries as usize * elem_sz; // entries from Reference, not the tag's repetitions!
         let end = start + byte_len;
 
         let tb = entry.tag_bytes();
@@ -980,7 +980,7 @@ impl<'data> M3File<'data> {
         Ok(self.copy_aligned(&self.data[start..end]))
     }
 
-    /// CHAR строка по Reference (count = байты, как и у тега).
+    /// CHAR string via Reference (count = bytes, same as a tag).
     pub fn read_char(&self, r: &Reference) -> Result<&'data str> {
         if r.entries == 0 {
             return Ok("");
@@ -996,10 +996,10 @@ impl<'data> M3File<'data> {
             .iter()
             .position(|&b| b == 0)
             .map_or(bytes, |i| &bytes[..i]);
-        from_utf8(bytes).map_err(|e| anyhow::anyhow!("Невалидный UTF-8: {e}"))
+        from_utf8(bytes).map_err(|e| anyhow::anyhow!("invalid UTF-8: {e}"))
     }
 
-    /// Копирует байты в Vec<T> с учётом выравнивания.
+    /// Copy bytes into a `Vec<T>` while honouring alignment.
     fn copy_aligned<T: bytemuck::Pod>(&self, raw: &[u8]) -> Vec<T> {
         let elem_sz = std::mem::size_of::<T>();
         match bytemuck::try_cast_slice::<u8, T>(raw) {
@@ -1008,7 +1008,7 @@ impl<'data> M3File<'data> {
                 debug!("copy_aligned: unaligned, {} bytes", raw.len());
                 let mut out = Vec::with_capacity(raw.len() / elem_sz);
                 for chunk in raw.chunks_exact(elem_sz) {
-                    // SAFETY: T: Pod, chunk выровнен по copy
+                    // SAFETY: T: Pod, chunk is the right size; we use unaligned read.
                     let val = unsafe { std::ptr::read_unaligned(chunk.as_ptr() as *const T) };
                     out.push(val);
                 }

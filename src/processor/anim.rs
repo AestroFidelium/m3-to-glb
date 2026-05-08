@@ -1,36 +1,35 @@
-//! Анимации: SEQS / STG_ / STC_ → glTF animations.
+//! Animations: SEQS / STG_ / STC_ → glTF animations.
 //!
-//! ## Маппинг M3 → glTF
+//! ## M3 → glTF mapping
 //!
-//! Каждый STC (sub-animation) соответствует одной glTF animation. Имя берём
-//! из `STC.name` (CHAR ссылки). Группа SEQS даёт нам границы времени
-//! (`anim_ms_start..anim_ms_end`) и общее имя группы — мы его не используем
-//! для именования (glTF плоский), но через STG.stc_indices мы узнаём, какие
-//! STC принадлежат данной SEQS, и этого достаточно для пары
-//! `(group, action) → STC name`.
+//! Each STC (sub-animation) becomes one glTF animation. The name comes from
+//! `STC.name` (a CHAR reference). A SEQS group gives us the time bounds
+//! (`anim_ms_start..anim_ms_end`) and a group name — we don't use the group
+//! for naming (glTF is flat), but `STG.stc_indices` tells us which STCs
+//! belong to a SEQS, which is enough for `(group, action) → STC name`.
 //!
-//! `STC.anim_refs[i]` — это упакованный `(anim_type << 16) | anim_index`:
-//!   anim_type индексирует массив SDxx внутри STC (см. m3studio
-//!   io_m3_import.py:701-704), a anim_index — это позиция в этом массиве.
+//! `STC.anim_refs[i]` is the packed `(anim_type << 16) | anim_index`:
+//!   `anim_type` indexes the SDxx array inside the STC (see m3studio
+//!   io_m3_import.py:701-704); `anim_index` is the slot inside that array.
 //!
-//! Per-bone TRS привязка идёт через `bone.location.header.id`,
-//! `bone.rotation.header.id`, `bone.scale.header.id` → ищем в `STC.anim_ids`,
-//! берём соответствующий `anim_refs[]`, расшифровываем `(type, index)`,
-//! читаем SD3V (для T/S) или SD4Q (для R).
+//! Per-bone TRS lookup goes through `bone.location.header.id`,
+//! `bone.rotation.header.id`, `bone.scale.header.id` → search them in
+//! `STC.anim_ids`, take the matching `anim_refs[]`, decode `(type, index)`,
+//! read SD3V (T/S) or SD4Q (R).
 //!
-//! **Корневые кости** получают тот же поворот Z-up→Y-up, что и в TRS rest pose
-//! (см. `glb/mod.rs::build_glb_content`). Это:
-//!   - translation: T' = R · T (поворот вектора)
-//!   - rotation:    Q' = R_quat ⊗ Q (композиция кватернионов)
-//!   - scale:       без изменений
-//! Если этого не сделать, корневые кости анимируются "мимо" повёрнутого меша.
+//! **Root bones** receive the same Z-up→Y-up rotation as the rest pose
+//! (see `glb/mod.rs::build_glb_content`). Specifically:
+//!   - translation: `T' = R · T` (rotate the vector)
+//!   - rotation:    `Q' = R_quat ⊗ Q` (compose quaternions)
+//!   - scale:       unchanged
+//! Without this the root bone animates "past" the rotated mesh.
 
 use crate::m3::reader::M3File;
 use crate::m3::structures::{Bone, Sd3v, Sd4q};
 use anyhow::Result;
 use tracing::debug;
 
-/// Z-up → Y-up rotation (rotate -90° around X), применяется к корневым костям.
+/// Z-up → Y-up rotation (rotate -90° around X), applied to root bones.
 const ZY_QUAT: [f32; 4] = [
     -std::f32::consts::FRAC_1_SQRT_2,
     0.0,
@@ -53,17 +52,17 @@ pub enum SamplerData {
 
 #[derive(Debug, Clone)]
 pub struct Sampler {
-    /// Время кадров в секундах (ms→s, делим на 1000).
+    /// Frame timestamps in seconds (ms→s, divide by 1000).
     pub times_sec: Vec<f32>,
     pub data:      SamplerData,
-    /// 0 = STEP (constant), 1 = LINEAR. По умолчанию LINEAR.
+    /// 0 = STEP (constant), 1 = LINEAR. We default to LINEAR.
     pub linear:    bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Channel {
     pub sampler:     usize,
-    pub target_node: usize, // нодовый индекс кости
+    pub target_node: usize, // node index of the bone
     pub path:        Path,
 }
 
@@ -74,13 +73,13 @@ pub struct Animation {
     pub channels: Vec<Channel>,
 }
 
-/// anim_type внутри anim_ref:
+/// `anim_type` inside `anim_ref`:
 ///  0=sdev, 1=sd2v, 2=sd3v, 3=sd4q, 4=sdcc, 5=sdr3, 6=sdu8,
 ///  7=sds6, 8=sdu6, 9=sds3, 10=sdu3, 11=sdfg, 12=sdmb
 const ANIM_TYPE_VEC3: u32 = 2;
 const ANIM_TYPE_QUAT: u32 = 3;
 
-/// Карта `anim_id → (anim_type, anim_index)` для одного STC.
+/// `anim_id → (anim_type, anim_index)` map for a single STC.
 struct StcLookup {
     map: ahash::AHashMap<u32, (u32, u32)>,
 }
@@ -101,16 +100,16 @@ impl StcLookup {
     }
 }
 
-/// Вычитает повторяющиеся таймштампы (m3studio делает то же — io_m3_import.py:714-720).
-/// Возвращает индексы, которые нужно сохранить.
+/// Drop duplicate timestamps (m3studio does the same — io_m3_import.py:714-720).
+/// Returns the indices to keep.
 fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
     let mut times = Vec::with_capacity(frames_ms.len());
     let mut keep = Vec::with_capacity(frames_ms.len());
     let mut prev: Option<i32> = None;
     for (i, &ms) in frames_ms.iter().enumerate() {
         if Some(ms) == prev {
-            // m3studio оставляет последнюю занимающую тот же кадр запись —
-            // мы делаем то же: переписываем последний keep на текущий index
+            // m3studio keeps the *last* sample sharing the same frame —
+            // we mirror that, rewriting the last `keep` entry.
             if let Some(last) = keep.last_mut() {
                 *last = i;
             }
@@ -148,14 +147,14 @@ fn rotate_vec_by_quat(v: [f32; 3], q: [f32; 4]) -> [f32; 3] {
     ]
 }
 
-/// Главная точка входа. Парсит SEQS/STG/STC из каждого источника и собирает
-/// список glTF-совместимых анимаций.
+/// Main entry point. Parses SEQS/STG/STC out of every source and produces
+/// the list of glTF-compatible animations.
 ///
-/// `base` — главный .m3 файл, из которого берутся кости и их `anim_id`.
-/// `anim_sources` — все файлы (включая `base`, если у него есть свои SEQS,
-/// и/или внешние `.m3a`), из которых читаются SEQS/STG/STC и SDxx данные.
-/// `bone_node_base` — индекс ноды первой кости в массиве glTF nodes (= 0
-/// в текущей раскладке glb/mod.rs).
+/// `base` — main `.m3` file; bones and their `anim_id`s come from here.
+/// `anim_sources` — every file (including `base` if it has its own SEQS,
+/// and/or external `.m3a` files) that contributes SEQS/STG/STC and SDxx data.
+/// `bone_node_base` — node index of the first bone in glTF nodes (= 0 in
+/// the current glb/mod.rs layout).
 pub fn build_animations(
     base:           &M3File<'_>,
     anim_sources:   &[&M3File<'_>],
@@ -173,7 +172,7 @@ pub fn build_animations(
 
         if seqs.is_empty() || stcs.is_empty() {
             debug!(
-                "anim source #{}: SEQS={} STC={} — пропускаю",
+                "anim source #{}: SEQS={} STC={} — skipping",
                 src_idx, seqs.len(), stcs.len()
             );
             continue;
@@ -186,7 +185,7 @@ pub fn build_animations(
 
         let mut emitted = vec![false; stcs.len()];
 
-        // Пара SEQS↔STG идёт по index (m3studio io_m3_import.py:680 zip).
+        // SEQS↔STG pair up by index (m3studio io_m3_import.py:680 zip).
         for (seq, stg) in seqs.iter().zip(stgs.iter()) {
             let group_name = src.read_char(&seq.name).unwrap_or("").to_owned();
             let stc_indices = src.read_ref_u32(&stg.stc_indices).unwrap_or_default();
@@ -205,7 +204,7 @@ pub fn build_animations(
             }
         }
 
-        // STC, не попавшие ни в одну STG.
+        // STCs not bound to any STG.
         for (stc_idx, stc) in stcs.iter().enumerate() {
             if emitted[stc_idx] { continue; }
             if let Some(anim) = build_one_animation(src, stc, &bones, "", bone_node_base)? {
@@ -226,13 +225,13 @@ fn build_one_animation(
 ) -> Result<Option<Animation>> {
     let stc_name = m3.read_char(&stc.name).unwrap_or("").to_owned();
     if stc_name.is_empty() {
-        debug!("STC: пустое имя, пропускаю");
+        debug!("STC: empty name, skipping");
         return Ok(None);
     }
 
-    // m3studio делает name.replace(group_name, '')[1:] чтобы получить чистое
-    // имя экшна, но для glTF удобнее оставлять полное имя — оно гарантированно
-    // уникальное и подходит для отображения в редакторах.
+    // m3studio computes `name.replace(group_name, '')[1:]` to derive a clean
+    // action name, but for glTF it's better to keep the full name — it's
+    // guaranteed unique and readable in editors.
     let _ = group_name;
     let anim_name = stc_name;
 
@@ -243,7 +242,7 @@ fn build_one_animation(
     }
     if anim_ids.len() != anim_refs.len() {
         debug!(
-            "STC '{}': anim_ids({}) != anim_refs({}); пропускаю",
+            "STC '{}': anim_ids({}) != anim_refs({}); skipping",
             anim_name, anim_ids.len(), anim_refs.len()
         );
         return Ok(None);
@@ -260,9 +259,9 @@ fn build_one_animation(
         let target_node = bone_node_base + bi;
         let is_root = bone.parent < 0;
 
-        // Translation. m3studio (key_fcurves в io_m3_import.py) фильтрует
-        // только по факту наличия anim_id в STC, не по header.flags — флаги
-        // в .m3 часто 0 даже для реально анимируемых костей.
+        // Translation. m3studio (`key_fcurves` in io_m3_import.py) filters
+        // only on the presence of the anim_id in STC, not on header.flags —
+        // flags are often 0 in the .m3 even for bones that *are* animated.
         let loc_id = bone.location.header.id;
         if loc_id != 0 {
             if let Some((kind, idx)) = lookup.lookup(loc_id) {
@@ -278,7 +277,7 @@ fn build_one_animation(
             }
         }
 
-        // Rotation
+        // Rotation.
         let rot_id = bone.rotation.header.id;
         if rot_id != 0 {
             if let Some((kind, idx)) = lookup.lookup(rot_id) {
@@ -294,8 +293,8 @@ fn build_one_animation(
             }
         }
 
-        // Scale (всегда пропускаем поворот корня — scale корня не получает
-        // вращательной коррекции, только translation/rotation).
+        // Scale (always skip the root rotation bake — scale on the root
+        // doesn't get the rotation correction, only translation/rotation do).
         let scl_id = bone.scale.header.id;
         if scl_id != 0 {
             if let Some((kind, idx)) = lookup.lookup(scl_id) {
@@ -314,7 +313,7 @@ fn build_one_animation(
 
     if channels.is_empty() {
         debug!(
-            "STC '{}': channels пуст (нет совпадений anim_id костей с anim_ids STC)",
+            "STC '{}': empty channels (no bone anim_id matched STC.anim_ids)",
             anim_name
         );
         return Ok(None);

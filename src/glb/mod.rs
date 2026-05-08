@@ -1,6 +1,6 @@
-//! Сборщик бинарного GLB (glTF 2.0 Binary).
+//! Binary GLB (glTF 2.0 Binary) assembler.
 //!
-//! # Структура GLB файла
+//! # GLB file layout
 //!
 //! ```text
 //! ┌───────────────────────────────────────────────────────┐
@@ -21,7 +21,7 @@
 //! └───────────────────────────────────────────────────────┘
 //! ```
 //!
-//! Все данные little-endian. Чанки выровнены по 4 байта.
+//! All data is little-endian. Chunks are 4-byte aligned.
 
 mod json_builder;
 
@@ -34,13 +34,13 @@ use bytemuck::cast_slice;
 use std::io::Write;
 use tracing::debug;
 
-// ─── Magic & Type константы ───────────────────────────────────────────────────
+// ─── Magic & type constants ──────────────────────────────────────────────────
 const GLB_MAGIC:       u32 = 0x46546C67; // "glTF"
 const GLB_VERSION:     u32 = 2;
 const CHUNK_TYPE_JSON: u32 = 0x4E4F534A; // "JSON"
 const CHUNK_TYPE_BIN:  u32 = 0x004E4942; // "BIN\0"
 
-/// Собирает GLB и записывает в файл.
+/// Assemble the GLB and write it to disk.
 pub fn pack_and_write(
     meshes:       &[MeshDataSoA],
     textures:     &TextureCache,
@@ -50,9 +50,9 @@ pub fn pack_and_write(
 ) -> Result<()> {
     let (json_bytes, bin_bytes) = build_glb_content(meshes, textures, m3, anim_sources)?;
 
-    // Выравниваем JSON по 4 байта (padding = пробелы 0x20)
+    // Align JSON to 4 bytes (padding = 0x20 spaces).
     let json_padded = align4_json(&json_bytes);
-    // Выравниваем BIN по 4 байта (padding = нули)
+    // Align BIN to 4 bytes (padding = zero bytes).
     let bin_padded  = align4_zeros(&bin_bytes);
 
     let total_size: u32 = 12 // GLB header
@@ -65,7 +65,7 @@ pub fn pack_and_write(
     );
 
     let mut file = std::fs::File::create(output_path)
-        .with_context(|| format!("Не могу создать файл: {}", output_path))?;
+        .with_context(|| format!("cannot create file: {}", output_path))?;
 
     // ── GLB Header ────────────────────────────────────────────────────────────
     write_u32(&mut file, GLB_MAGIC)?;
@@ -117,7 +117,7 @@ fn acc_norm(
     }
 }
 
-/// Строит JSON манифест и бинарный буфер GLB.
+/// Build the glTF JSON manifest and the binary GLB buffer.
 fn build_glb_content(
     meshes:       &[MeshDataSoA],
     textures:     &TextureCache,
@@ -130,25 +130,26 @@ fn build_glb_content(
     let mut buffer_views: Vec<json_builder::BufferView>  = Vec::new();
     let mut meshes_json:  Vec<json_builder::GltfMesh>    = Vec::new();
 
-    // ── Загружаем текстуры материалов ─────────────────────────────────────────
+    // ── Load material textures ───────────────────────────────────────────────
     let mat_count = m3.material_count();
     let madd_count = m3.madd_count();
     let matm_list = m3.material_references().unwrap_or_default();
     debug!(
-        "Материалов в M3: MAT_={}, MADD={}, MATM={}",
+        "M3 materials: MAT_={}, MADD={}, MATM={}",
         mat_count, madd_count, matm_list.len()
     );
 
     let mut images_json:    Vec<json_builder::GltfImage>    = Vec::new();
     let mut materials_json: Vec<json_builder::GltfMaterial> = Vec::new();
 
-    // Compact materials: эмитим только те MATM entries, на которые ссылается
-    // хотя бы один region primitive — иначе glTF выдаёт UNUSED_OBJECT info.
-    // region_primitives.material_index хранит индекс в matm_list.
+    // Compact materials: only emit MATM entries that are referenced by at
+    // least one region primitive — otherwise the glTF validator reports
+    // UNUSED_OBJECT. `region_primitives.material_index` holds the matm_list
+    // index.
     let used_matm: ahash::AHashSet<usize> = meshes.iter()
         .flat_map(|m| m.region_primitives.iter().filter_map(|rp| rp.material_index))
         .collect();
-    // matref_remap[matm_idx] → glTF material index (после компактификации).
+    // `matref_remap[matm_idx]` → glTF material index (after compaction).
     let mut matref_remap: Vec<Option<usize>> = vec![None; matm_list.len()];
 
     let mut load_image = |path: &str,
@@ -160,7 +161,7 @@ fn build_glb_content(
         let (tex_path, mime) = textures.find_with_mime(path)?;
         match std::fs::read(tex_path) {
             Ok(bytes) => {
-                debug!("Загружаю текстуру: {:?} ({} байт)", tex_path, bytes.len());
+                debug!("loading texture {:?} ({} bytes)", tex_path, bytes.len());
                 let bv_idx = push_buffer_view(buffer_views, bin_buf, &bytes, None);
                 let img_idx = images_json.len();
                 images_json.push(json_builder::GltfImage {
@@ -170,7 +171,7 @@ fn build_glb_content(
                 Some(img_idx)
             }
             Err(e) => {
-                debug!("Не удалось прочитать текстуру {:?}: {}", tex_path, e);
+                debug!("failed to read texture {:?}: {}", tex_path, e);
                 None
             }
         }
@@ -182,7 +183,7 @@ fn build_glb_content(
         }
         let mat_idx = matm.material_index as usize;
         let glt = match matm.mat_type {
-            // ── Стандартный MAT_ ─────────────────────────────────────────────
+            // ── Standard MAT_ ────────────────────────────────────────────────
             1 if mat_idx < mat_count => {
                 let base_color_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "diff").unwrap_or_default(),
@@ -237,10 +238,10 @@ fn build_glb_content(
                     double_sided,
                 }
             }
-            // ── MADD (новые HotS-герои; Tracer и т.д.) ────────────────────────
+            // ── MADD (newer HotS heroes; Tracer etc.) ────────────────────────
             12 if mat_idx < madd_count => {
                 let paths = m3.madd_texture_paths(mat_idx).unwrap_or_default();
-                debug!("MADD[{}] (matm[{}]): {} текстур", mat_idx, matm_idx, paths.len());
+                debug!("MADD[{}] (matm[{}]): {} texture(s)", mat_idx, matm_idx, paths.len());
                 let mut diff: Option<usize>  = None;
                 let mut norm: Option<usize>  = None;
                 let mut emis: Option<usize>  = None;
@@ -259,7 +260,7 @@ fn build_glb_content(
                         Some(MaddSlot::Ao) if ao.is_none() => {
                             ao = load_image(p, &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
-                        _ => {} // _spec / unknown / уже занят
+                        _ => {} // _spec / unknown / slot already filled
                     }
                 }
                 let emissive_factor = if emis.is_some() {
@@ -283,7 +284,7 @@ fn build_glb_content(
             }
             _ => {
                 debug!(
-                    "matm[{}] mat_type={} mat_idx={} — не поддерживаем, пропускаем",
+                    "matm[{}] mat_type={} mat_idx={} — unsupported, skipping",
                     matm_idx, matm.mat_type, mat_idx
                 );
                 continue;
@@ -304,7 +305,7 @@ fn build_glb_content(
 
         let mut primitives = Vec::new();
 
-        // ── Позиции ─────────────────────────────────────────────────────────
+        // ── Positions ───────────────────────────────────────────────────────
         let pos_bytes  = mesh.positions_as_bytes();
         let pos_bv_idx = push_buffer_view(&mut buffer_views, &mut bin_buf, &pos_bytes, Some(34962));
         let pos_acc_idx = accessors.len();
@@ -314,13 +315,13 @@ fn build_glb_content(
             Some(vec![mesh.aabb_max[0] as f64, mesh.aabb_max[1] as f64, mesh.aabb_max[2] as f64]),
         ));
 
-        // ── Нормали ──────────────────────────────────────────────────────────
+        // ── Normals ─────────────────────────────────────────────────────────
         let norm_bytes  = mesh.normals_as_bytes();
         let norm_bv_idx = push_buffer_view(&mut buffer_views, &mut bin_buf, &norm_bytes, Some(34962));
         let norm_acc_idx = accessors.len();
         accessors.push(acc(norm_bv_idx, 0, 5126, mesh.vertex_count(), "VEC3", None, None));
 
-        // ── Тангенты (VEC4: xyz + знак w) ────────────────────────────────────
+        // ── Tangents (VEC4: xyz + sign w) ───────────────────────────────────
         let tang_bytes  = mesh.tangents_as_bytes();
         let tang_bv_idx = push_buffer_view(&mut buffer_views, &mut bin_buf, &tang_bytes, Some(34962));
         let tang_acc_idx = accessors.len();
@@ -332,7 +333,7 @@ fn build_glb_content(
         let uv_acc_idx = accessors.len();
         accessors.push(acc(uv_bv_idx, 0, 5126, mesh.vertex_count(), "VEC2", None, None));
 
-        // ── Skin: JOINTS_0 / WEIGHTS_0 (если меш скиннинговый) ───────────────
+        // ── Skin: JOINTS_0 / WEIGHTS_0 (when the mesh is skinned) ───────────
         let (joints_acc_idx, weights_acc_idx) = if mesh.has_skin {
             let j_bytes  = mesh.joints_as_bytes();
             let j_bv_idx = push_buffer_view(&mut buffer_views, &mut bin_buf, j_bytes, Some(34962));
@@ -351,7 +352,7 @@ fn build_glb_content(
 
         mesh_skin_idx.push(if mesh.has_skin { Some(0) } else { None });
 
-        // ── Индексы ──────────────────────────────────────────────────────────
+        // ── Indices ─────────────────────────────────────────────────────────
         let idx_bytes_slice: &[u8] = cast_slice(&mesh.indices);
         let idx_bv_idx = push_buffer_view(
             &mut buffer_views, &mut bin_buf, idx_bytes_slice, Some(34963),
@@ -411,22 +412,22 @@ fn build_glb_content(
         });
     }
 
-    // ── Скелет ────────────────────────────────────────────────────────────────
-    // Для каждого скиннинг-меша строим один скелет (общий, если кости одни).
-    // В M3 кости общие для всей модели, поэтому достаточно одного skin.
+    // ── Skeleton ─────────────────────────────────────────────────────────────
+    // One skeleton per skinned mesh (shared if bones are common). In M3 the
+    // bones are shared across the whole model, so a single skin is enough.
     let any_skinned = meshes.iter().any(|m| m.has_skin);
     let bones = if any_skinned { m3.bones().unwrap_or_default() } else { Vec::new() };
     let bone_rests = if any_skinned { m3.bone_rests().unwrap_or_default() } else { Vec::new() };
 
-    // Layout сцены (без отдельного rotation root, чтобы skin mesh node был
-    // непосредственно в scene roots — иначе glTF выдаёт NODE_SKINNED_MESH_NON_ROOT
-    // и игнорирует parent transform):
-    //   [0..N_bones] bone nodes (in bone-array order, индекс bone i = i)
-    //   [N_bones]    mesh node (с mesh + skin reference)
+    // Scene layout (no separate rotation root — the skinned mesh node must
+    // sit directly in scene roots; otherwise glTF emits NODE_SKINNED_MESH_NON_ROOT
+    // and ignores the parent transform):
+    //   [0..N_bones] bone nodes (in bone-array order, bone i → index i)
+    //   [N_bones]    mesh node (with mesh + skin reference)
     //
-    // Поворот Z-up → Y-up уже запечён в позиции вершин (см. soa::apply_zup_to_yup).
-    // Корневые кости получают тот же поворот, чтобы rest pose совпадал с
-    // повёрнутыми вершинами.
+    // The Z-up → Y-up rotation is already baked into the vertex positions
+    // (see `soa::apply_zup_to_yup`). Root bones get the same rotation so the
+    // rest pose lines up with the rotated vertices.
     let mut nodes: Vec<json_builder::GltfNode> = Vec::new();
     let mut skins: Vec<json_builder::GltfSkin> = Vec::new();
 
@@ -447,7 +448,7 @@ fn build_glb_content(
         let s = bone.scale.default;
 
         let (translation, rotation) = if bone.parent < 0 {
-            // Root bone: bake Z-up → Y-up в local TRS:
+            // Root bone: bake Z-up → Y-up into the local TRS:
             //   T' = R · T (rotate translation vector)
             //   Q' = R_quat ⊗ Q (compose rotations)
             let t_rot = rotate_vec_by_quat([t.x, t.y, t.z], zy_quat);
@@ -467,7 +468,7 @@ fn build_glb_content(
             children:    Vec::new(),
         });
     }
-    // Build parent-children. parent == -1 → root bone (станет элементом scene roots).
+    // Build parent → children. parent == -1 → root bone (becomes a scene root).
     let mut bone_root_nodes: Vec<usize> = Vec::new();
     for (bi, bone) in bones.iter().enumerate() {
         let child_node = bone_node_base + bi;
@@ -483,14 +484,16 @@ fn build_glb_content(
 
     // Inverse Bind Matrices.
     //
-    // M3 IREF в m3studio используется как ориентационная матрица для Blender bone roll,
-    // а не как glTF IBM (который равен inverse(world bind matrix)). Чтобы корректно
-    // получить glTF IBM нужно вычислить world bind pose форвард-проходом по иерархии
-    // костей, потом инвертировать каждую матрицу. Делаем это здесь.
+    // m3studio uses M3 IREF as an orientation matrix for the Blender bone
+    // roll, not as a glTF IBM (which equals `inverse(world bind matrix)`).
+    // To produce a correct glTF IBM we forward-walk the bone hierarchy to
+    // compute the world bind pose, then invert every matrix. That's what we
+    // do here.
     //
-    // Передаём zy_quat — этим поворотом мы запекаем Z-up → Y-up в TRS корневых
-    // костей выше. Тот же поворот должен быть учтён при вычислении world matrices,
-    // иначе IBMs не совпадут с node TRS и скиннинг "сложит" модель в origin.
+    // We pass `zy_quat` — the same rotation baked into the root-bone TRS
+    // above. It must also feed into the world-matrix computation, otherwise
+    // the IBMs won't match the node TRS and skinning will "fold" the model
+    // toward the origin.
     let skin_idx = if any_skinned && !bones.is_empty() {
         let world: Vec<[[f32; 4]; 4]> = compute_world_matrices(&bones, zy_quat);
         let mut ibm_bytes: Vec<u8> = Vec::with_capacity(bones.len() * 64);
@@ -508,17 +511,17 @@ fn build_glb_content(
         skins.push(json_builder::GltfSkin {
             joints,
             inverse_bind_matrices: Some(ibm_acc_idx),
-            // Skeleton поле необязательное; оставляем None чтобы избежать ошибки
-            // SKIN_SKELETON_INVALID если корней костей несколько.
+            // The `skeleton` field is optional; we leave it None to avoid
+            // SKIN_SKELETON_INVALID when there are multiple bone roots.
             skeleton: None,
         });
-        let _ = bone_rests; // оставляем читателя для будущего использования (Phase 4 анимации)
+        let _ = bone_rests; // reader retained for future use (rest-pose tooling)
         Some(0)
     } else {
         None
     };
 
-    // Mesh node — после bones.
+    // Mesh node — after the bones.
     let mesh_node = if !meshes_json.is_empty() {
         let idx = nodes.len();
         nodes.push(json_builder::GltfNode {
@@ -535,12 +538,13 @@ fn build_glb_content(
         None
     };
 
-    // glTF требует чтобы все joints в skin имели общего предка (SKIN_NO_COMMON_ROOT
-    // если нет). При нескольких корневых костях оборачиваем их в "armature" node
-    // без transform — стандартный layout для skinned моделей (e.g., CesiumMan).
+    // glTF requires all joints in a skin to share a common ancestor
+    // (SKIN_NO_COMMON_ROOT otherwise). When there are multiple root bones we
+    // wrap them in a transform-free "armature" node — the standard layout
+    // for skinned models (e.g., CesiumMan).
     //
-    // mesh node остаётся прямым root scene'а — это требование для скиннинговых
-    // мешей (NODE_SKINNED_MESH_NON_ROOT).
+    // The mesh node stays a direct scene root — required for skinned meshes
+    // (NODE_SKINNED_MESH_NON_ROOT).
     let mut scene_roots: Vec<usize> = Vec::new();
     if !bones.is_empty() {
         let armature_idx = nodes.len();
@@ -564,10 +568,10 @@ fn build_glb_content(
         scene_roots.push(0);
     }
 
-    // ── Анимации ──────────────────────────────────────────────────────────────
-    // bone_node_base = 0: кости занимают первые [0..bones.len()] нод-индексов.
-    // Источниками анимаций служат: основной .m3 (на случай встроенных SEQS) +
-    // любые внешние .m3a, переданные через --anims. Если костей нет — пропускаем.
+    // ── Animations ───────────────────────────────────────────────────────────
+    // bone_node_base = 0: bones occupy the first [0..bones.len()] node indices.
+    // Animation sources: the main `.m3` (in case it carries inline SEQS) +
+    // every external `.m3a` passed via --anims. If there are no bones, skip.
     let m3_anims = if any_skinned && !bones.is_empty() {
         let mut sources: Vec<&M3File<'_>> = Vec::with_capacity(1 + anim_sources.len());
         sources.push(m3);
@@ -581,12 +585,12 @@ fn build_glb_content(
     for src in &m3_anims {
         let mut samplers_json: Vec<json_builder::GltfAnimSampler> = Vec::with_capacity(src.samplers.len());
         for samp in &src.samplers {
-            // Input accessor: time (FLOAT, SCALAR). Spec требует min/max.
+            // Input accessor: time (FLOAT, SCALAR). The spec requires min/max.
             let times_bytes: &[u8] = cast_slice(&samp.times_sec);
             let in_bv = push_buffer_view(&mut buffer_views, &mut bin_buf, times_bytes, None);
             let in_acc = accessors.len();
             let (t_min, t_max) = samp.times_sec.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &t| (lo.min(t), hi.max(t)));
-            // Если только один кадр, min == max — это валидно.
+            // If there's a single frame, `min == max` — that's valid.
             accessors.push(acc(
                 in_bv, 0, 5126, samp.times_sec.len(), "SCALAR",
                 Some(vec![t_min as f64]),
@@ -639,7 +643,7 @@ fn build_glb_content(
         });
     }
 
-    // ── Строим JSON ───────────────────────────────────────────────────────────
+    // ── Build JSON ───────────────────────────────────────────────────────────
     let json = json_builder::build_json(
         &meshes_json,
         &accessors,
@@ -888,16 +892,16 @@ fn write_u32(w: &mut impl Write, v: u32) -> Result<()> {
     w.write_all(&v.to_le_bytes()).map_err(Into::into)
 }
 
-/// Слот текстуры MADD-материала, определённый по суффиксу имени файла.
-/// MADD не имеет явных полей diff/norm/emis, поэтому маппим по конвенции HotS:
-/// `..._diff.dds`, `..._norm.dds`, `..._emis.dds`, `..._ao.dds`.
-/// `_spec` мы пока игнорируем (нет прямого PBR-аналога; specular/glossiness
-/// extension не используется).
+/// MADD material texture slot, derived from the filename suffix.
+/// MADD has no explicit diff/norm/emis fields, so we route by HotS naming
+/// convention: `..._diff.dds`, `..._norm.dds`, `..._emis.dds`, `..._ao.dds`.
+/// `_spec` is ignored for now (no direct PBR analogue; we don't use the
+/// specular/glossiness extension).
 #[derive(Debug, Clone, Copy)]
 enum MaddSlot { Diff, Norm, Emis, Ao }
 
 fn slot_from_filename(path: &str) -> Option<MaddSlot> {
-    // Получаем нижний регистр файлового стема (без расширения и пути).
+    // Lowercase the file stem (no extension, no path).
     let stem = std::path::Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())

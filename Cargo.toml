@@ -41,8 +41,8 @@ clap_complete = "4"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Заглушаем ложные варнинги от multiversion про retpoline cfg.
-# Это шум самого крейта, не наш код.
+# Silence false-positive warnings from `multiversion` about its retpoline cfg.
+# Noise from the crate itself, not our code.
 # ──────────────────────────────────────────────────────────────────────────────
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
@@ -51,11 +51,11 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Release: максимальные оптимизации
-# lto = "fat"      → межкрейтовый инлайн SIMD кода
-# codegen-units = 1 → одна единица компиляции, лучший инлайн
-# panic = "abort"  → убираем unwind overhead
-# strip = "symbols" → меньший бинарник
+# Release: maximum optimisation
+# lto = "fat"       → cross-crate inlining of SIMD code
+# codegen-units = 1 → one CGU, best inlining
+# panic = "abort"   → drop unwind overhead
+# strip = "symbols" → smaller binary
 # ──────────────────────────────────────────────────────────────────────────────
 [profile.release]
 opt-level = 3
@@ -64,7 +64,7 @@ codegen-units = 1
 panic = "abort"
 strip = "symbols"
 
-# Зависимости в dev тоже с оптимизациями (rayon, wide быстрее)
+# Dev dependencies stay optimised (rayon, wide are noticeably faster).
 [profile.dev.package."*"]
 opt-level = 3
 

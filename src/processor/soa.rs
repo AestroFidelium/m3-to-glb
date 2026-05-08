@@ -1,79 +1,79 @@
-//! Структура данных меша в формате SoA (Structure of Arrays).
+//! Mesh data in SoA (Structure of Arrays) form.
 //!
-//! Каждое поле — плотный массив одного типа.
-//! SIMD и rayon работают максимально эффективно на плотных массивах.
+//! Each field is a dense single-type array. Both SIMD and rayon work most
+//! efficiently against dense arrays.
 
 use smallvec::SmallVec;
 
-/// Информация о primitive для отдельного региона меша.
-/// Позволяет назначать разные материалы на разные регионы внутри одного меша.
+/// Primitive info for a single region of a mesh.
+/// Lets a single mesh carry different materials per region.
 #[derive(Debug, Clone, Default)]
 pub struct RegionPrimitiveInfo {
-    /// Начало диапазона индексов в общем `indices` массиве (элементы u32)
+    /// Start of the index range inside the shared `indices` array (u32 elements).
     pub index_start: usize,
-    /// Количество индексов в диапазоне
+    /// Length of the index range.
     pub index_count: usize,
-    /// Индекс записи в массиве MATM (`material_references` в MODL).
-    /// glb/mod.rs читает `matm[idx].mat_type` чтобы диспатчить на MAT_ или MADD.
-    /// `None` — материал не поддерживается (mat_type ∉ {1, 12}).
+    /// Index into the MATM array (`material_references` in MODL).
+    /// glb/mod.rs reads `matm[idx].mat_type` to dispatch to MAT_ or MADD.
+    /// `None` — material type is unsupported (mat_type ∉ {1, 12}).
     pub material_index: Option<usize>,
 }
 
-/// Данные меша в SoA формате. Готовы к прямой записи в GLB буфер.
+/// SoA mesh data. Ready to be written straight into the GLB buffer.
 ///
-/// # Инварианты
+/// # Invariants
 ///
-/// Все массивы `positions_*`, `normals_*`, `uvs_*` имеют одинаковую длину.
-/// `indices` — плоский список треугольников (каждые 3 элемента = один треугольник).
+/// All `positions_*`, `normals_*`, `uvs_*` arrays share the same length.
+/// `indices` is a flat list of triangles (every 3 elements form one triangle).
 #[derive(Default)]
 pub struct MeshDataSoA {
-    // ── Позиции (горячие данные — используются в каждом вычислении) ─────────
+    // ── Positions (hot data — touched on every transform) ───────────────────
     pub positions_x: Vec<f32>,
     pub positions_y: Vec<f32>,
     pub positions_z: Vec<f32>,
 
-    // ── Нормали ──────────────────────────────────────────────────────────────
+    // ── Normals ─────────────────────────────────────────────────────────────
     pub normals_x: Vec<f32>,
     pub normals_y: Vec<f32>,
     pub normals_z: Vec<f32>,
 
-    // ── Тангенты ─────────────────────────────────────────────────────────────
+    // ── Tangents ────────────────────────────────────────────────────────────
     pub tangents_x: Vec<f32>,
     pub tangents_y: Vec<f32>,
     pub tangents_z: Vec<f32>,
-    pub tangents_w: Vec<f32>, // знак битангента (bitangent sign)
+    pub tangents_w: Vec<f32>, // bitangent sign
 
-    // ── UV-координаты ────────────────────────────────────────────────────────
+    // ── UV coordinates ──────────────────────────────────────────────────────
     pub uvs_u: Vec<f32>,
     pub uvs_v: Vec<f32>,
 
-    // ── Скиннинг ─────────────────────────────────────────────────────────────
-    /// JOINTS_0 атрибут: 4 индекса костей на вершину (в скин joints array).
-    /// Используем u16 чтобы поддержать модели с > 255 костями.
+    // ── Skinning ────────────────────────────────────────────────────────────
+    /// JOINTS_0 attribute: 4 bone indices per vertex (into the skin joints array).
+    /// u16 to support models with > 255 bones.
     pub joints: Vec<[u16; 4]>,
-    /// WEIGHTS_0 атрибут: 4 веса на вершину как uint8 нормализованные (0..255).
-    /// При выводе помечаем normalized=true → шейдер делит на 255.
+    /// WEIGHTS_0 attribute: 4 weights per vertex as normalised uint8 (0..255).
+    /// We mark `normalized = true` on output → the shader divides by 255.
     pub weights: Vec<[u8; 4]>,
-    /// True если меш скиннинговый (есть skin0/skin1 во vertex_flags). Если
-    /// false — joints/weights пусты, primitives не содержат JOINTS_0/WEIGHTS_0.
+    /// True when the mesh is skinned (skin0/skin1 set in vertex_flags). When
+    /// false, joints/weights are empty and primitives carry no JOINTS_0/WEIGHTS_0.
     pub has_skin: bool,
 
-    // ── Треугольники ─────────────────────────────────────────────────────────
+    // ── Triangles ───────────────────────────────────────────────────────────
     pub indices: Vec<u32>,
 
-    // ── Метаданные ───────────────────────────────────────────────────────────
+    // ── Metadata ────────────────────────────────────────────────────────────
 
-    /// AABB (bounding box) — вычисляется при конвертации
+    /// AABB (bounding box) — computed during conversion.
     pub aabb_min: [f32; 3],
     pub aabb_max: [f32; 3],
 
-    /// Имена регионов (маленький vec — регионов обычно мало)
+    /// Region names (small vec — region count is usually low).
     pub region_names: SmallVec<[String; 4]>,
 
-    /// Информация о primitives для каждого региона (для multi-material мешей)
+    /// Per-region primitive info (for multi-material meshes).
     pub region_primitives: Vec<RegionPrimitiveInfo>,
 
-    /// Счётчик вершин до начала следующего региона
+    /// Vertex counter at the start of the next region.
     vertex_cursor: usize,
 }
 
@@ -86,8 +86,8 @@ impl MeshDataSoA {
         }
     }
 
-    /// Предаллоцирует память под заданное количество вершин.
-    /// Вызывай перед началом обработки для снижения количества реаллокаций.
+    /// Pre-allocate space for the given vertex count.
+    /// Call before processing to cut down on reallocations.
     pub fn reserve(&mut self, vertex_count: usize, index_count: usize) {
         self.positions_x.reserve(vertex_count);
         self.positions_y.reserve(vertex_count);
@@ -106,36 +106,36 @@ impl MeshDataSoA {
         self.indices.reserve(index_count);
     }
 
-    /// Количество вершин в меше.
+    /// Vertex count.
     #[inline]
     pub fn vertex_count(&self) -> usize {
         self.positions_x.len()
     }
 
-    /// Количество треугольников.
+    /// Triangle count.
     #[inline]
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
 
-    /// Возвращает базовый индекс вершины для следующего региона.
-    /// Используется при склейке нескольких регионов в один меш.
+    /// Base vertex index for the next region.
+    /// Used when stitching multiple regions into one mesh.
     #[inline]
     pub(super) fn base_vertex_for_region(&self) -> usize {
         self.vertex_cursor
     }
 
-    /// Вызывается после добавления всех вершин одного региона.
+    /// Call after every vertex of a region has been pushed.
     pub(super) fn commit_region(&mut self) {
         self.vertex_cursor = self.vertex_count();
     }
 
-    /// Применяет ротацию Z-up → Y-up (поворот -90° вокруг X) к позициям,
-    /// нормалям, тангентам и AABB. Z-up → Y-up: (x, y, z) → (x, z, -y).
+    /// Apply the Z-up → Y-up rotation (-90° around X) to positions, normals,
+    /// tangents and the AABB. Z-up → Y-up: `(x, y, z) → (x, z, -y)`.
     ///
-    /// Для скиннинговых мешей этот же поворот должен быть применён к корневым
-    /// костям (см. `glb/mod.rs::build_glb_content`), иначе rest pose останется
-    /// в M3-координатах.
+    /// For skinned meshes the same rotation must be applied to the root
+    /// bones (see `glb/mod.rs::build_glb_content`); otherwise the rest pose
+    /// stays in M3 coordinates.
     pub fn apply_zup_to_yup(&mut self) {
         for i in 0..self.vertex_count() {
             let py = self.positions_y[i];
@@ -149,30 +149,30 @@ impl MeshDataSoA {
             let ty = self.tangents_y[i];
             self.tangents_y[i] = self.tangents_z[i];
             self.tangents_z[i] = -ty;
-            // tangents_w (bitangent sign) не трогаем
+            // tangents_w (bitangent sign) is left alone.
         }
-        // AABB: y_new = z_old; z_new = -y_old → min/max по z флипают.
+        // AABB: y_new = z_old; z_new = -y_old → min/max along z flip.
         let new_min = [self.aabb_min[0], self.aabb_min[2], -self.aabb_max[1]];
         let new_max = [self.aabb_max[0], self.aabb_max[2], -self.aabb_min[1]];
         self.aabb_min = new_min;
         self.aabb_max = new_max;
     }
 
-    /// Joints (UNSIGNED_SHORT VEC4) → байты для записи в GLB.
+    /// Joints (UNSIGNED_SHORT VEC4) → bytes for the GLB buffer.
     pub fn joints_as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.joints)
     }
 
-    /// Weights (UNSIGNED_BYTE VEC4 normalized) → байты для записи в GLB.
+    /// Weights (UNSIGNED_BYTE VEC4 normalised) → bytes for the GLB buffer.
     pub fn weights_as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.weights)
     }
 
-    /// Конвертирует SoA обратно в AoS для записи в GLB.
+    /// Convert SoA back to AoS for the GLB write phase.
     ///
-    /// GLB хранит данные в interleaved формате, поэтому нам нужно
-    /// перемежить данные при финальной записи.
-    /// `bytemuck::cast_slice` позволяет записывать f32 массивы напрямую.
+    /// GLB stores attributes in interleaved form, so we reinterleave at the
+    /// final write step. `bytemuck::cast_slice` lets us emit the f32 arrays
+    /// directly without per-element work.
     pub fn positions_as_bytes(&self) -> Vec<u8> {
         // interleaved XYZ
         let mut out = Vec::with_capacity(self.vertex_count() * 12);
@@ -198,8 +198,8 @@ impl MeshDataSoA {
         self.uvs_as_bytes_scaled(1.0, 1.0)
     }
 
-    /// UV с применением масштаба от uv_tiling из материала.
-    /// В M3: uv_final = uv_raw * tiling (тайлинг умножается, а не делится).
+    /// UVs scaled by `uv_tiling` from the material.
+    /// In M3: `uv_final = uv_raw * tiling` (multiply, not divide).
     pub fn uvs_as_bytes_scaled(&self, tiling_u: f32, tiling_v: f32) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 8);
         for i in 0..self.vertex_count() {
@@ -215,7 +215,7 @@ impl MeshDataSoA {
         bytemuck::cast_slice(&self.indices)
     }
 
-    /// Тангенты как VEC4 (xyzw) — glTF требует 4 компонента, w = знак битангента.
+    /// Tangents as VEC4 (xyzw) — glTF requires 4 components, w is the bitangent sign.
     pub fn tangents_as_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 16);
         for i in 0..self.vertex_count() {

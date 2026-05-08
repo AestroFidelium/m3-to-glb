@@ -1,26 +1,26 @@
-//! Бинарные структуры формата M3 (StarCraft 2 / Blizzard).
+//! Binary structs of the M3 format (StarCraft 2 / Blizzard).
 //!
-//! Сгенерировано из structures.xml (SC2Mapster/m3addon).
+//! Generated from structures.xml (SC2Mapster/m3addon).
 //!
-//! Все структуры помечены `#[repr(C)]` + `bytemuck::Pod + Zeroable`.
-//! Это позволяет делать zero-copy cast из `&[u8]` → `&[StructType]`
-//! через `bytemuck::from_bytes` / `bytemuck::cast_slice`.
+//! Every struct is `#[repr(C)]` + `bytemuck::Pod + Zeroable`.
+//! That lets us zero-copy cast `&[u8]` → `&[StructType]`
+//! via `bytemuck::from_bytes` / `bytemuck::cast_slice`.
 //!
-//! # Соглашения по именованию
-//! - `VN` суффикс означает конкретную версию структуры (например `BoneV1`).
-//! - Поля с `since_version` / `till_version` закомментированы если они не входят
-//!   в основную (наибольшую поддерживаемую) версию.
-//! - Для версионных структур есть псевдонимы типа `pub type Bone = BoneV1;`.
+//! # Naming conventions
+//! - The `VN` suffix denotes a specific version of the struct (e.g. `BoneV1`).
+//! - Fields tagged with `since_version` / `till_version` are commented out if they
+//!   are absent from the primary (highest supported) version.
+//! - Versioned structs come with aliases like `pub type Bone = BoneV1;`.
 
 #![allow(dead_code, non_snake_case)]
 
 use bytemuck::{Pod, Zeroable};
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  БАЗОВЫЕ ПРИМИТИВЫ
+//  BASIC PRIMITIVES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// CHAR — один байт символа. Массив всегда завершается нулём.
+/// CHAR — single character byte. Arrays are always nul-terminated.
 /// version 0, size 1
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -28,7 +28,7 @@ pub struct Char {
     pub value: u8,
 }
 
-/// FLAG — uint32, используется для хранения нескольких флагов анимации.
+/// FLAG — uint32, packs multiple animation flags.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -36,7 +36,7 @@ pub struct Flag {
     pub value: u32,
 }
 
-/// U8__ — беззнаковый целый 8 бит.
+/// U8__ — unsigned 8-bit integer.
 /// version 0, size 1
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -44,7 +44,7 @@ pub struct U8 {
     pub value: u8,
 }
 
-/// I16_ — знаковый целый 16 бит.
+/// I16_ — signed 16-bit integer.
 /// version 0, size 2
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -52,7 +52,7 @@ pub struct I16 {
     pub value: i16,
 }
 
-/// U16_ — беззнаковый целый 16 бит.
+/// U16_ — unsigned 16-bit integer.
 /// version 0, size 2
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -60,7 +60,7 @@ pub struct U16 {
     pub value: u16,
 }
 
-/// I32_ — знаковый целый 32 бит.
+/// I32_ — signed 32-bit integer.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -68,7 +68,7 @@ pub struct I32 {
     pub value: i32,
 }
 
-/// U32_ — беззнаковый целый 32 бит.
+/// U32_ — unsigned 32-bit integer.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -76,7 +76,7 @@ pub struct U32 {
     pub value: u32,
 }
 
-/// U64_ — беззнаковый целый 64 бит.
+/// U64_ — unsigned 64-bit integer.
 /// version 0, size 8
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -84,7 +84,7 @@ pub struct U64 {
     pub value: u64,
 }
 
-/// COL — цвет BGRA, по 1 байту на канал.
+/// COL — BGRA colour, one byte per channel.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -103,7 +103,7 @@ pub struct Real {
     pub value: f32,
 }
 
-/// VEC2 — вектор 2 компонента.
+/// VEC2 — 2-component vector.
 /// version 0, size 8
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -112,7 +112,7 @@ pub struct Vec2 {
     pub y: f32,
 }
 
-/// VEC3 — вектор 3 компонента.
+/// VEC3 — 3-component vector.
 /// version 0, size 12
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -122,7 +122,7 @@ pub struct Vec3 {
     pub z: f32,
 }
 
-/// VEC4 — вектор 4 компонента.
+/// VEC4 — 4-component vector.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -133,7 +133,7 @@ pub struct Vec4 {
     pub w: f32,
 }
 
-/// QUAT — кватернион.
+/// QUAT — quaternion.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -146,23 +146,23 @@ pub struct Quat {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ВСПОМОГАТЕЛЬНЫЕ СТРУКТУРЫ
+//  HELPER STRUCTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Reference — ссылка на один или несколько элементов в файле.
+/// Reference — pointer to one or more elements inside the file.
 /// version 0, size 12
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Reference {
-    /// Количество элементов
+    /// Element count.
     pub entries: u32,
-    /// Индекс в таблице тегов
+    /// Index in the tag table.
     pub index:   u32,
-    /// Флаги (обычно 0 или 1)
+    /// Flags (typically 0 or 1).
     pub flags:   u32,
 }
 
-/// SmallReference — ссылка без поля flags (используется в MD33).
+/// SmallReference — Reference without the flags field (used in MD33).
 /// version 0, size 8
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -171,7 +171,7 @@ pub struct SmallReference {
     pub index:   u32,
 }
 
-/// Vector3As3uint8 — вектор из 3 байт; (i / 255.0) → float.
+/// Vector3As3uint8 — 3-byte vector; `i / 255.0 → float`.
 /// version 0, size 3
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -181,7 +181,7 @@ pub struct Vector3As3uint8 {
     pub z: u8,
 }
 
-/// Vector2As2int16 — вектор из int16; (i / 2048.0) → float.
+/// Vector2As2int16 — int16 vector; `i / 2048.0 → float`.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -190,7 +190,7 @@ pub struct Vector2As2int16 {
     pub y: i16,
 }
 
-/// Matrix44 — матрица 4×4.
+/// Matrix44 — 4×4 matrix.
 /// version 0, size 64
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -202,7 +202,7 @@ pub struct Matrix44 {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  BNDS — ОГРАНИЧИВАЮЩИЙ ОБЪЁМ
+//  BNDS — BOUNDING VOLUME
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// BNDS — bounding box + sphere. Center = (min+max)/2.
@@ -216,10 +216,10 @@ pub struct Bnds {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  EVNT — СОБЫТИЕ АНИМАЦИИ
+//  EVNT — ANIMATION EVENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// EVNT — событие анимационной последовательности.
+/// EVNT — animation sequence event.
 /// version 2, size 108
 ///
 /// Layout:
@@ -250,12 +250,12 @@ pub struct EvntV2 {
 pub type Evnt = EvntV2;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ANIMATION REFERENCE HEADER И ТИПЫ
+//  ANIMATION REFERENCE HEADER AND TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// AnimationReferenceHeader — заголовок ссылки на анимацию.
+/// AnimationReferenceHeader — animation reference header.
 /// interpolation: 0=constant, 1=linear
-/// flags: 6 = действительная ссылка, 0 = пустая
+/// flags: 6 = valid reference, 0 = empty.
 /// version 0, size 8
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -265,7 +265,7 @@ pub struct AnimationReferenceHeader {
     pub id:            u32,
 }
 
-/// Vector3AnimationReference — анимируемый vec3.
+/// Vector3AnimationReference — animated vec3.
 /// version 0, size 36
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -276,7 +276,7 @@ pub struct Vector3AnimationReference {
     pub unused:  i32,
 }
 
-/// Vector2AnimationReference — анимируемый vec2.
+/// Vector2AnimationReference — animated vec2.
 /// version 0, size 28
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -287,7 +287,7 @@ pub struct Vector2AnimationReference {
     pub unused:  i32,
 }
 
-/// QuaternionAnimationReference — анимируемый кватернион.
+/// QuaternionAnimationReference — animated quaternion.
 /// version 0, size 44
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -298,7 +298,7 @@ pub struct QuaternionAnimationReference {
     pub unused:  i32,
 }
 
-/// UInt32AnimationReference — анимируемый u32.
+/// UInt32AnimationReference — animated u32.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -309,7 +309,7 @@ pub struct UInt32AnimationReference {
     pub unused:  i32,
 }
 
-/// UInt16AnimationReference — анимируемый u16.
+/// UInt16AnimationReference — animated u16.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -320,7 +320,7 @@ pub struct UInt16AnimationReference {
     pub unused:  i32,
 }
 
-/// Int16AnimationReference — анимируемый i16.
+/// Int16AnimationReference — animated i16.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -331,7 +331,7 @@ pub struct Int16AnimationReference {
     pub unused:  i32,
 }
 
-/// FloatAnimationReference — анимируемый f32.
+/// FloatAnimationReference — animated f32.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -342,7 +342,7 @@ pub struct FloatAnimationReference {
     pub unused:  i32,
 }
 
-/// ColorAnimationReference — анимируемый цвет COL.
+/// ColorAnimationReference — animated COL colour.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -353,7 +353,7 @@ pub struct ColorAnimationReference {
     pub unused:  i32,
 }
 
-/// FlagAnimationReference — анимируемый булев флаг (хранится как u32).
+/// FlagAnimationReference — animated boolean flag (stored as u32).
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -364,7 +364,7 @@ pub struct FlagAnimationReference {
     pub unused:  i32,
 }
 
-/// BNDSAnimationReference — анимируемый bounding volume.
+/// BNDSAnimationReference — animated bounding volume.
 /// version 0, size 68
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -376,10 +376,10 @@ pub struct BndsAnimationReference {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  БАЗОВЫЕ СЕКЦИИ-СПИСКИ
+//  BASIC LIST SECTIONS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// SCHR — строка пути к ресурсу.
+/// SCHR — resource path string.
 /// version 0, size 12
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -387,7 +387,7 @@ pub struct Schr {
     pub path: Reference,
 }
 
-/// SR32 — список анимируемых float.
+/// SR32 — list of animated floats.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -395,7 +395,7 @@ pub struct Sr32 {
     pub value: FloatAnimationReference,
 }
 
-/// SVC3 — список анимируемых 3D-векторов.
+/// SVC3 — list of animated 3D vectors.
 /// version 0, size 36
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -404,10 +404,10 @@ pub struct Svc3 {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  АНИМАЦИОННЫЕ БЛОКИ КЛЮЧЕВЫХ КАДРОВ (SD**)
+//  ANIMATION KEYFRAME BLOCKS (SD**)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Общий layout всех SD** блоков: size 32
+/// Shared layout for every SD** block: size 32.
 /// frames → ref to I32_, flags u32, fend u32, keys → ref to <type>
 macro_rules! sd_block {
     ($name:ident, $doc:literal) => {
@@ -424,22 +424,22 @@ macro_rules! sd_block {
     };
 }
 
-sd_block!(Sdev, "SDEV — ключевые кадры событий (ссылка на EVNT).");
-sd_block!(Sd2v, "SD2V — ключевые кадры VEC2.");
-sd_block!(Sd3v, "SD3V — ключевые кадры VEC3.");
-sd_block!(Sdr3, "SDR3 — ключевые кадры REAL (float).");
-sd_block!(Sdcc, "SDCC — ключевые кадры COL.");
-sd_block!(Sdu8, "SDU8 — ключевые кадры U8__.");
-sd_block!(Sds6, "SDS6 — ключевые кадры I16_.");
-sd_block!(Sds3, "SDS3 — ключевые кадры I32_.");
-sd_block!(Sdu6, "SDU6 — ключевые кадры U16_.");
-sd_block!(Sdu3, "SDU3 — ключевые кадры U32_.");
-sd_block!(Sd4q, "SD4Q — ключевые кадры QUAT.");
-sd_block!(Sdfg, "SDFG — ключевые кадры FLAG.");
-sd_block!(Sdmb, "SDMB — ключевые кадры BNDS.");
+sd_block!(Sdev, "SDEV — event keyframes (reference to EVNT).");
+sd_block!(Sd2v, "SD2V — VEC2 keyframes.");
+sd_block!(Sd3v, "SD3V — VEC3 keyframes.");
+sd_block!(Sdr3, "SDR3 — REAL (float) keyframes.");
+sd_block!(Sdcc, "SDCC — COL keyframes.");
+sd_block!(Sdu8, "SDU8 — U8__ keyframes.");
+sd_block!(Sds6, "SDS6 — I16_ keyframes.");
+sd_block!(Sds3, "SDS3 — I32_ keyframes.");
+sd_block!(Sdu6, "SDU6 — U16_ keyframes.");
+sd_block!(Sdu3, "SDU3 — U32_ keyframes.");
+sd_block!(Sd4q, "SD4Q — QUAT keyframes.");
+sd_block!(Sdfg, "SDFG — FLAG keyframes.");
+sd_block!(Sdmb, "SDMB — BNDS keyframes.");
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  STC_ — КОЛЛЕКЦИЯ ТРАНСФОРМАЦИЙ ПОСЛЕДОВАТЕЛЬНОСТИ
+//  STC_ — SEQUENCE TRANSFORMATION COLLECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// STC_ — Sequence Transformations Collection.
@@ -497,11 +497,11 @@ pub struct StcV4 {
 pub type Stc = StcV4;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  SEQS — АНИМАЦИОННАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ
+//  SEQS — ANIMATION SEQUENCE
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// SEQS — Animation Sequence.
-/// version 2, size 92  (без поля unknown05)
+/// version 2, size 92 (no `unknown05` field).
 ///
 /// Layout v2 (92 bytes):
 ///   +0   id              i32    4   (default -1)
@@ -536,7 +536,7 @@ pub struct SeqsV2 {
     pub anim_sets:       Reference,
 }
 
-/// SEQS version 1, size 96 (включает unknown05: u32)
+/// SEQS version 1, size 96 (carries `unknown05: u32`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct SeqsV1 {
@@ -559,7 +559,7 @@ pub struct SeqsV1 {
 pub type Seqs = SeqsV2;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  STG_ — ГРУППА ТРАНСФОРМАЦИЙ
+//  STG_ — TRANSFORMATION GROUP
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// STG_ — Sequence Transformation Group.
@@ -575,7 +575,7 @@ pub struct Stg {
 //  BSET — ANIM SET DATA
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// BSET — SAnimSetData (заменяет SBonesetData).
+/// BSET — SAnimSetData (replaces SBonesetData).
 /// version 0, size 32
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -605,10 +605,10 @@ pub struct Sts {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  BONE — КОСТЬ СКЕЛЕТА
+//  BONE — SKELETON BONE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// BONE — кость скелета.
+/// BONE — skeleton bone.
 /// version 1, size 160
 ///
 /// Layout:
@@ -639,10 +639,10 @@ pub struct BoneV1 {
 pub type Bone = BoneV1;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IREF — ИСХОДНАЯ ПОЗИЦИЯ КОСТИ
+//  IREF — BONE REST MATRIX
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// IREF — baseline position/orientation матрица кости.
+/// IREF — baseline position/orientation matrix for a bone.
 /// version 0, size 64
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -651,10 +651,10 @@ pub struct Iref {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  REGN — РЕГИОН МЕША
+//  REGN — MESH REGION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// REGN version 5 — полный layout, size 48.
+/// REGN version 5 — full layout, size 48.
 ///
 ///   +0   id                      u32  4
 ///   +4   unknown01                u32  4  (since v3)
@@ -694,7 +694,7 @@ pub struct RegnV5 {
     pub uv_offset:             f32,
 }
 
-/// REGN version 4, size 40 (без uv_multiply / uv_offset).
+/// REGN version 4, size 40 (no `uv_multiply` / `uv_offset`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct RegnV4 {
@@ -714,7 +714,7 @@ pub struct RegnV4 {
     pub flags:                 u32,
 }
 
-/// REGN version 3, size 36 (без flags).
+/// REGN version 3, size 36 (no `flags`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct RegnV3 {
@@ -733,7 +733,7 @@ pub struct RegnV3 {
     pub root_bone:             u16,
 }
 
-/// REGN version 2, size 28 (first_vertex_index и vertex_count — u16).
+/// REGN version 2, size 28 (`first_vertex_index` and `vertex_count` are u16).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct RegnV2 {
@@ -757,7 +757,7 @@ pub type Regn = RegnV5;
 //  BAT_ — BATCH
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// BAT_ — связывает регион с материалом.
+/// BAT_ — binds a region to a material.
 /// version 1, size 14
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -777,7 +777,7 @@ pub type Bat = BatV1;
 //  MSEC — MESH SECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// MSEC — секция меша с bounding.
+/// MSEC — mesh section with bounds.
 /// version 1, size 72
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -817,7 +817,7 @@ pub type Div = DivV2;
 //  ATT_ — ATTACHMENT POINT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// ATT_ — точка присоединения.
+/// ATT_ — attachment point.
 /// version 1, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -830,7 +830,7 @@ pub struct AttV1 {
 pub type Att = AttV1;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  LITE — ИСТОЧНИК СВЕТА
+//  LITE — LIGHT SOURCE
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// LITE — Light. types: 0=directional 1=point 2=spot.
@@ -918,7 +918,7 @@ pub struct PatuV4 {
     pub main_bone_offset: Vec3,
 }
 
-/// PATU version 1, size 100 (без quat_up0/1, yaw_weight, pitch_weight, main_bone_offset)
+/// PATU version 1, size 100 (no `quat_up0/1`, `yaw_weight`, `pitch_weight`, `main_bone_offset`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct PatuV1 {
@@ -952,10 +952,10 @@ pub struct Trgd {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  DMMN / DMMT / DMME / MT16 / MT32 — ФИЗИКА МЕША
+//  DMMN / DMMT / DMME / MT16 / MT32 — PHYSICS MESH
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// DMMN version 1, size 8 (используется с PHSH v3).
+/// DMMN version 1, size 8 (used with PHSH v3).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct DmmnV1 {
@@ -969,7 +969,7 @@ pub struct DmmnV1 {
     pub unknown_07: u8,
 }
 
-/// DMMN version 0, size 12 (используется с PHSH v2).
+/// DMMN version 0, size 12 (used with PHSH v2).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct DmmnV0 {
@@ -984,7 +984,7 @@ pub struct DmmnV0 {
     pub unknown_07: u8,
 }
 
-/// DMMT — треугольник mesh для PHSH v2.
+/// DMMT — mesh triangle for PHSH v2.
 /// version 0, size 28
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -998,7 +998,7 @@ pub struct Dmmt {
     pub dmmt_float:     f32,
 }
 
-/// DMME — edge структура для PHSH v2.
+/// DMME — edge struct for PHSH v2.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -1010,7 +1010,7 @@ pub struct Dmme {
     pub dmmt_index_1:   u32,
 }
 
-/// MT16 — для PHSH v3.
+/// MT16 — for PHSH v3.
 /// version 0, size 14
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -1024,7 +1024,7 @@ pub struct Mt16 {
     pub unknown_fbb8bb46: u16,
 }
 
-/// MT32 — для PHSH v3.
+/// MT32 — for PHSH v3.
 /// version 0, size 28
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -1039,14 +1039,14 @@ pub struct Mt32 {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  LAYR — СЛОЙ МАТЕРИАЛА
+//  LAYR — MATERIAL LAYER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// LAYR version 20–22 (базовый), size 356.
+/// LAYR version 20–22 (base), size 356.
 ///
 /// Layout:
 ///   +0    id                  u32                   4
-///   +4    color_bitmap        Reference            12   ← путь к текстуре
+///   +4    color_bitmap        Reference            12   ← texture path
 ///   +16   color_value         ColorAnimationRef    20
 ///   +36   flags               u32                   4
 ///   +40   uv_source           u32                   4
@@ -1118,7 +1118,7 @@ pub struct LayrV20 {
 pub type Layr = LayrV20;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MATM — ССЫЛКА НА МАТЕРИАЛ
+//  MATM — MATERIAL REFERENCE
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// MATM — Material Reference.
@@ -1131,7 +1131,7 @@ pub struct Matm {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MAT_ — СТАНДАРТНЫЙ МАТЕРИАЛ
+//  MAT_ — STANDARD MATERIAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// MAT_ version 20, size 352.
@@ -1521,8 +1521,8 @@ pub type RefMat = RefMatV3;
 
 /// PAR_ version 24, size 1496.
 ///
-/// Это самая большая структура в формате M3.
-/// Ниже — полный layout версии 24 (since_version/till_version учтены):
+/// This is the largest struct in the M3 format.
+/// Below: full layout for version 24 (`since_version` / `till_version` honoured).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct ParV24 {
@@ -1821,7 +1821,7 @@ pub struct PhclV4 {
     pub local_wind:              Vec3,
 }
 
-/// PHCL version 2, size 136 (без полей since_version 4)
+/// PHCL version 2, size 136 (no `since_version 4` fields).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct PhclV2 {
@@ -2202,7 +2202,7 @@ pub struct RibV9 {
 pub type Rib = RibV9;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  IK СТРУКТУРЫ
+//  IK STRUCTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// IK2J — Two Joints IK Solver.
@@ -2399,13 +2399,13 @@ pub struct MaddV3 {
 pub type Madd = MaddV3;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MODL — КОРНЕВАЯ МОДЕЛЬ
+//  MODL — ROOT MODEL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// MODL version 30, size 868 — самая полная версия.
+/// MODL version 30, size 868 — the most complete version.
 ///
-/// Это корневая структура M3 файла. Содержит ссылки на все подсекции.
-/// Размер и состав полей постепенно росли с версии 20 до 30.
+/// Root struct of an M3 file. Holds references to every sub-section.
+/// Size and field set grew gradually from version 20 to 30.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct ModlV30 {
@@ -2479,11 +2479,11 @@ pub struct ModlV30 {
 pub type Modl = ModlV30;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ЗАГОЛОВКИ ФАЙЛА
+//  FILE HEADERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// MD34 — заголовок M3 файла.
-/// Всегда находится в начале файла.
+/// MD34 — M3 file header.
+/// Always sits at the start of the file.
 /// version 11, size 24
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -2495,7 +2495,7 @@ pub struct Md34 {
     pub model:        Reference,
 }
 
-/// MD33 — заголовок M3 файла (SC2 Beta версия, использует SmallReference).
+/// MD33 — M3 file header (SC2 Beta version, uses SmallReference).
 /// version 11, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -2507,30 +2507,30 @@ pub struct Md33 {
     pub model:        SmallReference,
 }
 
-/// MDIndexEntry — запись в таблице тегов файла.
-/// Существует в версиях 33 (MD33) и 34 (MD34).
+/// MDIndexEntry — one entry in the file tag table.
+/// Exists in versions 33 (MD33) and 34 (MD34).
 /// version 33/34, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct MdIndexEntry {
-    /// Тег (4 ASCII символа, например b"REGN", b"BONE")
+    /// Tag (4 ASCII characters, e.g. `b"REGN"`, `b"BONE"`).
     pub tag:         u32,
-    /// Смещение данных от начала файла (в байтах)
+    /// Byte offset of the section data from the file start.
     pub offset:      u32,
-    /// Количество элементов
+    /// Element count.
     pub repetitions: u32,
-    /// Версия секции
+    /// Section version.
     pub version:     u32,
 }
 
 impl MdIndexEntry {
-    /// Возвращает тег как срез байт.
+    /// Return the tag as a byte slice.
     #[inline]
     pub fn tag_bytes(&self) -> [u8; 4] {
         self.tag.to_le_bytes()
     }
 
-    /// Возвращает диапазон байт в файле для данной секции.
+    /// Return the byte range of this section inside the file.
     #[inline]
     pub fn byte_range(&self, elem_size: usize) -> std::ops::Range<usize> {
         let start = self.offset as usize;

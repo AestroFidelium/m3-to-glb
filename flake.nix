@@ -20,25 +20,25 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Stable с нужными компонентами
+        # Stable with the components we need.
         rustStable = pkgs.rust-bin.stable.latest.default.override {
           extensions = [
-            "rust-src" # нужен для rust-analyzer
-            "llvm-tools-preview" # нужен для cargo-llvm-lines, cargo-show-asm
+            "rust-src" # required by rust-analyzer
+            "llvm-tools-preview" # required by cargo-llvm-lines, cargo-show-asm
           ];
         };
 
-        # Nightly — для cranelift, polonius, std::simd, optimize_attribute
+        # Nightly — for cranelift, polonius, std::simd, optimize_attribute.
         rustNightly = pkgs.rust-bin.nightly.latest.default.override {
           extensions = [
             "rust-src"
             "llvm-tools-preview"
-            "rustc-codegen-cranelift-preview" # быстрая компиляция в dev
+            "rustc-codegen-cranelift-preview" # fast dev compiles
           ];
         };
 
-        # Минимальный nightly для воспроизводимой сборки пакета
-        # (без cranelift / llvm-tools — они не нужны для release).
+        # Minimal nightly for reproducible package builds
+        # (no cranelift / llvm-tools — release doesn't need them).
         rustBuild = pkgs.rust-bin.nightly.latest.default;
 
         rustPlatform = pkgs.makeRustPlatform {
@@ -52,21 +52,21 @@
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          # `.cargo/config.toml` требует clang + mold как линковщик.
-          # `installShellFiles` — для установки zsh-подсказок из build.rs.
+          # `.cargo/config.toml` pins clang + mold as the linker.
+          # `installShellFiles` ships the zsh completions emitted by build.rs.
           nativeBuildInputs = [
             pkgs.clang
             pkgs.mold
             pkgs.installShellFiles
           ];
 
-          # `build.rs` генерирует `completions/_m3-to-glb` рядом с исходниками.
-          # Кладём в `$out/share/zsh/site-functions/` — стандартный fpath.
+          # `build.rs` generates `completions/_m3-to-glb` next to the source.
+          # Drop it into `$out/share/zsh/site-functions/` — the standard fpath.
           postInstall = ''
             installShellCompletion --zsh completions/_m3-to-glb
           '';
 
-          # `nix run` показывает имя через mainProgram.
+          # `nix run` shows the binary name via mainProgram.
           meta = {
             description = "Fast Rust converter from Blizzard M3 (StarCraft II / Heroes of the Storm) to glTF 2.0 Binary";
             homepage = "https://github.com/AestroFidelium/m3-to-glb";
@@ -89,39 +89,39 @@
 
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
-            rustNightly # или rustStable если не нужен nightly
+            rustNightly # swap for rustStable if nightly isn't needed
 
-            # линковщик — ускоряет cargo build в dev в 5-10x
+            # Linker — speeds up dev `cargo build` by 5-10x.
             pkgs.mold
-            pkgs.clang # нужен как frontend для mold
+            pkgs.clang # used as the frontend for mold
 
-            # cargo-инструменты профилирования и разработки
-            pkgs.cargo-flamegraph # CPU профиль
-            pkgs.cargo-show-asm # cargo asm — смотреть что сгенерировал компилятор
-            pkgs.cargo-llvm-lines # что раздувает бинарник
-            pkgs.cargo-nextest # быстрый test runner (до 3x быстрее cargo test)
-            pkgs.cargo-watch # watcher для скриптов и CI
-            pkgs.bacon # умный watcher с TUI
-            pkgs.cargo-tarpaulin # покрытие кода (только Linux)
+            # cargo profiling / dev tooling
+            pkgs.cargo-flamegraph # CPU profile
+            pkgs.cargo-show-asm # `cargo asm` — inspect what the compiler emitted
+            pkgs.cargo-llvm-lines # find what bloats the binary
+            pkgs.cargo-nextest # fast test runner (up to 3x faster than cargo test)
+            pkgs.cargo-watch # watcher for scripts and CI
+            pkgs.bacon # smart watcher with a TUI
+            pkgs.cargo-tarpaulin # code coverage (Linux only)
 
-            # системные инструменты профилирования
+            # System profiling tools
             pkgs.linuxPackages.perf # perf stat, perf record
-            pkgs.heaptrack # heap профилировщик с flamegraph по памяти
+            pkgs.heaptrack # heap profiler with flamegraph view
 
-            # LLVM инструменты
-            pkgs.llvmPackages.llvm # llvm-profdata, llvm-bolt и др.
+            # LLVM tooling
+            pkgs.llvmPackages.llvm # llvm-profdata, llvm-bolt, etc.
 
-            # системные зависимости
+            # System dependencies
             pkgs.pkg-config
             pkgs.openssl.dev
           ];
 
           shellHook = ''
-            # mold линковщик через clang
+            # mold linker via clang
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${pkgs.clang}/bin/clang"
             export RUSTFLAGS="-C link-arg=-fuse-ld=${pkgs.mold}/bin/mold"
 
-            echo "🦀 Rust dev env ready (nightly + mold)"
+            echo "Rust dev env ready (nightly + mold)"
           '';
         };
       }

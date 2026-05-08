@@ -1,4 +1,4 @@
-//! Геометрический движок: конвертация M3 AoS → SoA + SIMD трансформации.
+//! Geometry engine: M3 AoS → SoA conversion plus SIMD transforms.
 
 pub mod anim;
 mod soa;
@@ -11,7 +11,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 use tracing::debug;
 
-/// Конвертирует все меши M3 в SoA формат параллельно через rayon.
+/// Convert every M3 mesh into SoA form, in parallel via rayon.
 pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
     let divisions = m3.divisions()?;
     if divisions.is_empty() { return Ok(Vec::new()); }
@@ -23,12 +23,12 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 
     debug!("vertex_flags=0x{:08X} stride={} offsets={:?}", vertex_flags, stride, offsets);
 
-    // Читаем material references и bone_lookup один раз
+    // Read material references and bone_lookup once.
     let mat_refs    = m3.material_references().unwrap_or_default();
     let bone_lookup = m3.bone_lookup().unwrap_or_default();
 
-    // Собираем регионы/индексы/batches последовательно (M3File не Sync),
-    // потом параллельная конвертация через rayon.
+    // Gather regions / indices / batches sequentially (M3File is not Sync),
+    // then convert each Division in parallel via rayon.
     type DivPayload = (Vec<crate::m3::structures::Regn>, u32, Vec<u16>, Vec<crate::m3::structures::Bat>);
     let div_data: Vec<DivPayload> = divisions
         .iter()
@@ -45,7 +45,7 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
         .enumerate()
         .map(|(div_idx, (regions, regn_version, indices, batches))| {
             debug!(
-                "Конвертирую Division #{} ({} регионов v{}, {} batches)",
+                "converting Division #{} ({} regions v{}, {} batches)",
                 div_idx, regions.len(), regn_version, batches.len()
             );
             let mut soa = convert_division(
@@ -53,19 +53,21 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
                 &regions, regn_version, &indices, &batches, &mat_refs,
                 &bone_lookup,
             )?;
-            // M3 хранит модели в Z-up; glTF — Y-up. Запекаем поворот -90° вокруг X
-            // прямо в позиции/нормали/тангенты/AABB. Для скиннинговых мешей в
-            // glb/mod.rs тот же поворот применяется к корневым костям.
+            // M3 stores models Z-up; glTF is Y-up. Bake the -90° rotation
+            // around X into positions / normals / tangents / AABB. For
+            // skinned meshes glb/mod.rs applies the same rotation to root
+            // bones.
             soa.apply_zup_to_yup();
             Ok(soa)
         })
         .collect()
 }
 
-// ─── Смещения компонентов вершины ─────────────────────────────────────────────
+// ─── Vertex component offsets ────────────────────────────────────────────────
 
-/// Вычисленные смещения компонентов внутри вершины.
-/// Основаны на vertex_flags из MODL, согласно m3studio io_m3.py:144 `get_vertex_description`.
+/// Component offsets inside a vertex.
+/// Derived from `vertex_flags` in MODL, following m3studio
+/// io_m3.py:144 `get_vertex_description`.
 #[derive(Debug, Clone)]
 pub struct VertexOffsets {
     pub normal:  Option<usize>,
@@ -77,30 +79,30 @@ pub struct VertexOffsets {
 
 #[derive(Debug, Clone, Copy)]
 pub struct SkinLayout {
-    /// Смещение weights[0..pairs] (uint8, по байту) от начала вершины.
+    /// Offset of `weights[0..pairs]` (uint8 each) from the vertex start.
     pub weights_offset: usize,
-    /// Смещение lookups[0..pairs] (uint8, по байту) от начала вершины.
+    /// Offset of `lookups[0..pairs]` (uint8 each) from the vertex start.
     pub lookups_offset: usize,
-    /// Количество пар weight/lookup на вершину: 2 (только skin0 или только skin1) или 4 (оба).
+    /// Number of weight/lookup pairs per vertex: 2 (skin0 or skin1 only) or 4 (both).
     pub pairs:          usize,
 }
 
 impl VertexOffsets {
-    /// Вычисляет смещения компонентов из vertex_flags по правилам m3studio
+    /// Compute component offsets from `vertex_flags`, mirroring m3studio
     /// (io_m3.py:144 `get_vertex_description`).
     ///
-    /// Layout (с типичным flags=0x01860261, stride=40):
+    /// Layout (typical flags=0x01860261, stride=40):
     ///   +0:  pos       [f32;3]                    12B  (0x1)
-    ///   +12: weights[N] uint8×pairs                NB  (skin0/skin1: pairs=2 или 4)
+    ///   +12: weights[N] uint8×pairs                NB  (skin0/skin1: pairs=2 or 4)
     ///   +12+N: lookups[N] uint8×pairs              NB
     ///   +20: normalf  [f32;3]                     12B  (0x80)
     ///   +20: normal+sign uint8×4                   4B  (0x800000)
     ///   +24: test100  uint32                       4B  (0x100)
     ///   +24: col      [u8;4]                       4B  (0x200)
     ///   +28: testNNN  uint32                       4B  (0x400/0x800/0x1000)
-    ///   ...: fuvN     [f32;2]                      8B каждый (0x2000..0x10000)
-    ///   ...: uvN      [i16;2]                      4B каждый (0x20000..0x100000)
-    ///   ...: normal_v3 / tangent_v3 [f32;3]       12B каждый (0x200000/0x400000)
+    ///   ...: fuvN     [f32;2]                      8B each (0x2000..0x10000)
+    ///   ...: uvN      [i16;2]                      4B each (0x20000..0x100000)
+    ///   ...: normal_v3 / tangent_v3 [f32;3]       12B each (0x200000/0x400000)
     ///   ...: tangent  [u8;4]                       4B  (0x1000000)
     pub fn from_flags(flags: u32) -> Self {
         let mut off: usize = 12; // pos always (0x1)
@@ -160,7 +162,7 @@ impl VertexOffsets {
     }
 }
 
-// ─── Конвертация одного Division ─────────────────────────────────────────────
+// ─── Single-Division conversion ──────────────────────────────────────────────
 
 fn convert_division(
     vertex_data:  &[u8],
@@ -175,15 +177,16 @@ fn convert_division(
 ) -> Result<MeshDataSoA> {
     let mut soa = MeshDataSoA::new();
 
-    // Привязка material→region. m3studio (io_m3_import.py:1056) собирает ВСЕ
-    // batches с batch.region_index == ri и выводит их как material slots на
-    // одном меше; в glTF на выходе остаётся ОДИН primitive с первым материалом
-    // (остальные batches — метаданные toggling по костям, glTF таких сцен не
-    // описывает). Поэтому берём ПЕРВЫЙ batch региона.
+    // Material→region binding. m3studio (io_m3_import.py:1056) collects ALL
+    // batches with `batch.region_index == ri` and emits them as material
+    // slots on the same mesh; in glTF we end up with ONE primitive that
+    // wears the first material (the rest are bone-toggling metadata that
+    // glTF can't express). So pick the FIRST batch of each region.
     //
-    // Здесь хранится ИНДЕКС matm-записи (а не mat_ или madd напрямую). glb/mod.rs
-    // потом читает matm[idx].mat_type и диспатчит на MAT_ (тип 1) или MADD (тип
-    // 12). Принимаем оба типа — для остальных (DIS_/CMP_/...) оставляем None.
+    // The stored value is the MATM-record INDEX, not a MAT_/MADD index.
+    // glb/mod.rs reads `matm[idx].mat_type` and dispatches to MAT_ (type 1)
+    // or MADD (type 12). Both are accepted here; everything else
+    // (DIS_/CMP_/...) stays None.
     let mut region_to_mat: Vec<Option<usize>> = vec![None; regions.len()];
     for batch in batches {
         let ridx = batch.region_index as usize;
@@ -210,13 +213,13 @@ fn convert_division(
             region_to_mat.get(ri).copied().flatten()
         );
 
-        // Позиции (offset=0 всегда)
+        // Positions (offset=0 always).
         transform::extract_positions_to_soa(vertex_data, first, count, stride, &mut soa)?;
 
-        // Скиннинг — JOINTS_0/WEIGHTS_0. Окно bone_lookup для региона:
+        // Skinning — JOINTS_0/WEIGHTS_0. The bone_lookup window for the region:
         //   region_lookup = bone_lookup[first_bone_lookup_index..+bone_lookup_count]
-        // Внутри per-vertex lookup байт индексирует это окно; значение даёт
-        // глобальный индекс кости (= индекс в skin.joints[]).
+        // Within a vertex, the lookup byte indexes this window; the value yields
+        // the global bone index (= index in `skin.joints[]`).
         if let Some(layout) = offsets.skin {
             let lk_start = region.first_bone_lookup_idx as usize;
             let lk_count = region.bone_lookup_count as usize;
@@ -227,7 +230,7 @@ fn convert_division(
             )?;
         }
 
-        // Нормали
+        // Normals.
         if let Some(normal_off) = offsets.normal {
             transform::decode_normals_simd(vertex_data, first, count, stride, normal_off, &mut soa)?;
         } else {
@@ -238,7 +241,7 @@ fn convert_division(
             }
         }
 
-        // Тангенты (VEC4: xyz + знак w)
+        // Tangents (VEC4: xyz + sign w).
         if let Some(tangent_off) = offsets.tangent {
             transform::decode_tangents(vertex_data, first, count, stride, tangent_off, &mut soa)?;
         } else {
@@ -250,8 +253,8 @@ fn convert_division(
             }
         }
 
-        // UV — m3studio всегда использует uv0 (если присутствует во vertex_flags).
-        // Формула: raw * uv_multiply / 32768 + uv_offset, V flipped.
+        // UVs — m3studio always uses uv0 if present in vertex_flags.
+        // Formula: `raw * uv_multiply / 32768 + uv_offset`, V flipped.
         {
             let uv_multiply = if region.uv_multiply == 0.0 { 16.0 } else { region.uv_multiply };
             let uv_offset = region.uv_offset;
@@ -269,9 +272,9 @@ fn convert_division(
             }
         }
 
-        // Индексы. Для REGN v≤2 индексы абсолютные (от начала vertex buffer),
-        // нужно вычесть first_vertex_index чтобы сделать их региональными
-        // (см. m3studio io_m3_import.py:1066-1068).
+        // Indices. For REGN v≤2 indices are absolute (relative to the vertex
+        // buffer); we subtract `first_vertex_index` to make them region-local
+        // (see m3studio io_m3_import.py:1066-1068).
         let fi = region.first_face_index as usize;
         let ni = region.face_count as usize;
         let index_start = soa.indices.len();

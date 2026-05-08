@@ -1,11 +1,11 @@
-//! Построитель glTF 2.0 JSON манифеста.
+//! glTF 2.0 JSON manifest builder.
 //!
-//! Намеренно без serde — используем ручную конкатенацию строк для скорости
-//! и нулевых зависимостей. JSON минимальный, но валидный по спецификации glTF 2.0.
+//! Deliberately serde-free — plain string concatenation for speed and zero
+//! dependencies. The JSON is minimal but valid per the glTF 2.0 spec.
 
 use std::fmt::Write as FmtWrite;
 
-// ─── Промежуточные структуры данных ──────────────────────────────────────────
+// ─── Intermediate data structures ────────────────────────────────────────────
 
 pub struct Accessor {
     pub buffer_view:    usize,
@@ -59,7 +59,7 @@ pub struct GltfMesh {
     pub primitives: Vec<Primitive>,
 }
 
-/// Узел сцены glTF — может быть костью, мешем или просто группой.
+/// glTF scene node — may be a bone, a mesh, or just a grouping node.
 pub struct GltfNode {
     pub name:        Option<String>,
     pub translation: Option<[f32; 3]>,
@@ -94,9 +94,9 @@ pub struct GltfAnimation {
     pub channels: Vec<GltfAnimChannel>,
 }
 
-// ─── Построитель JSON ─────────────────────────────────────────────────────────
+// ─── JSON builder ────────────────────────────────────────────────────────────
 
-/// Строит полный glTF JSON манифест.
+/// Build the full glTF JSON manifest.
 #[allow(clippy::too_many_arguments)]
 pub fn build_json(
     meshes:       &[GltfMesh],
@@ -378,7 +378,7 @@ fn write_node(j: &mut String, n: &GltfNode) {
     j.push('}');
 }
 
-/// Компактный вывод f32: `1.0`, `-3.0`, `1.5`.
+/// Compact f32 formatting: `1.0`, `-3.0`, `1.5`.
 fn format_f32(v: f32) -> String {
     if v.is_finite() && v == v.trunc() && v.abs() < 1e15 {
         format!("{:.1}", v)

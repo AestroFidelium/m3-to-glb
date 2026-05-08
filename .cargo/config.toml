@@ -5,16 +5,16 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 [profile.release]
 opt-level = 3
 lto = "thin"      # Link Time Optimization
-codegen-units = 1 # лучше инлайнинг, медленнее сборка
-panic = "abort"   # убирает unwinding overhead
-strip = true      # убрать debug символы
+codegen-units = 1 # better inlining, slower build
+panic = "abort"   # removes unwinding overhead
+strip = true      # drop debug symbols
 
 [profile.dev]
-opt-level = 0                 # быстрая компиляция
-codegen-backend = "cranelift" # включить если есть nightly
+opt-level = 0                 # fast compile
+codegen-backend = "cranelift" # enable when nightly is available
 
 [profile.dev.package."*"]
-opt-level = 3 # зависимости всегда оптимизированы
+opt-level = 3 # dependencies are always optimised
 
 [unstable]
 codegen-backend = true
