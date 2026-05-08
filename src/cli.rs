@@ -48,10 +48,12 @@ pub struct Cli {
     #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
-    /// Transcode every embedded texture to KTX2/UASTC + Zstd with mipmaps.
-    /// Output uses the `KHR_texture_basisu` glTF extension. Drastically
-    /// reduces VRAM in engines that transcode at load time (Bevy, three.js).
-    /// Requires `toktx` (KTX-Software) on PATH.
+    /// Transcode every embedded texture to KTX2 with a mip chain. Encoder
+    /// is picked per material slot: baseColor/emissive → ETC1S/BasisLZ;
+    /// normal/occlusion → UASTC + Zstd, OETF tagged linear. Output uses
+    /// the `KHR_texture_basisu` glTF extension. Drastically reduces VRAM
+    /// in engines that transcode at load time (Bevy, three.js). Requires
+    /// `toktx` (KTX-Software) on PATH.
     #[arg(long)]
     pub ktx2: bool,
 
@@ -63,6 +65,13 @@ pub struct Cli {
     /// will reject it. Use only when targeting Bevy 0.17.x.
     #[arg(long, requires = "ktx2")]
     pub bevy_compat: bool,
+
+    /// Cap each embedded texture so its largest dimension does not exceed
+    /// this many pixels. Aspect ratio is preserved (Lanczos3). Useful when
+    /// the model sits far from camera and source 2K/4K textures would just
+    /// waste VRAM. Default 0 = no resize.
+    #[arg(long, value_name = "PX", default_value_t = 0)]
+    pub max_tex_size: u32,
 
     /// Log level (off, error, warn, info, debug, trace). Default: warn.
     #[arg(short, long, default_value = "warn", value_name = "LEVEL")]

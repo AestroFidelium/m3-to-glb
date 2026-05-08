@@ -38,13 +38,17 @@ use tracing::{debug, warn};
 /// Per-conversion options that affect how textures and geometry are packed.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PackOptions {
-    /// Transcode every embedded texture to KTX2/UASTC and emit the
-    /// `KHR_texture_basisu` glTF extension. Requires `toktx` on PATH.
+    /// Transcode every embedded texture to KTX2 (ETC1S for color, UASTC+Zstd
+    /// for data) and emit the `KHR_texture_basisu` glTF extension. Requires
+    /// `toktx` on PATH.
     pub ktx2: bool,
     /// Non-canonical workaround for Bevy 0.17: reference KTX2 images via
     /// `texture.source` + `mimeType:"image/ktx2"` and omit the
     /// `KHR_texture_basisu` extension declaration. Implies `ktx2`.
     pub bevy_compat: bool,
+    /// If non-zero, downscale every embedded texture so its largest
+    /// dimension is at most this many pixels (aspect-preserving Lanczos3).
+    pub max_tex_size: u32,
 }
 
 // ─── Magic & type constants ──────────────────────────────────────────────────
@@ -168,8 +172,10 @@ fn build_glb_content(
     // `matref_remap[matm_idx]` → glTF material index (after compaction).
     let mut matref_remap: Vec<Option<usize>> = vec![None; matm_list.len()];
 
-    let want_ktx2 = options.ktx2;
-    let mut load_image = |path: &str,
+    let want_ktx2    = options.ktx2;
+    let max_tex_size = options.max_tex_size;
+    let load_image = |path: &str,
+                          role: ktx2::TextureRole,
                           buffer_views: &mut Vec<json_builder::BufferView>,
                           bin_buf: &mut Vec<u8>,
                           images_json: &mut Vec<json_builder::GltfImage>|
@@ -178,13 +184,16 @@ fn build_glb_content(
         let (tex_path, mime) = textures.find_with_mime(path)?;
 
         // Try KTX2 transcode first when requested. On failure (toktx missing,
-        // unsupported source format, etc.) fall back to the original bytes.
+        // unsupported source format, etc.) fall back to the original bytes,
+        // still respecting the optional downscale.
         let (bytes, final_mime): (Vec<u8>, String) = if want_ktx2 {
-            match ktx2::transcode(tex_path) {
+            let opts = ktx2::EncodeOptions { role, max_dim: max_tex_size };
+            match ktx2::transcode(tex_path, &opts) {
                 Ok(b) => {
                     debug!(
-                        "transcoded {:?} → KTX2/UASTC ({} bytes)",
+                        "transcoded {:?} → KTX2 ({:?}, {} bytes)",
                         tex_path,
+                        role,
                         b.len()
                     );
                     (b, "image/ktx2".to_owned())
@@ -194,8 +203,8 @@ fn build_glb_content(
                         "KTX2 transcode failed for {:?}: {} — embedding original",
                         tex_path, e
                     );
-                    match std::fs::read(tex_path) {
-                        Ok(b) => (b, mime.to_owned()),
+                    match ktx2::read_with_optional_downscale(tex_path, max_tex_size, mime) {
+                        Ok(t) => t,
                         Err(e2) => {
                             debug!("failed to read texture {:?}: {}", tex_path, e2);
                             return None;
@@ -204,10 +213,10 @@ fn build_glb_content(
                 }
             }
         } else {
-            match std::fs::read(tex_path) {
-                Ok(b) => {
-                    debug!("loading texture {:?} ({} bytes)", tex_path, b.len());
-                    (b, mime.to_owned())
+            match ktx2::read_with_optional_downscale(tex_path, max_tex_size, mime) {
+                Ok((b, m)) => {
+                    debug!("loading texture {:?} ({} bytes, mime={})", tex_path, b.len(), m);
+                    (b, m)
                 }
                 Err(e) => {
                     debug!("failed to read texture {:?}: {}", tex_path, e);
@@ -235,18 +244,22 @@ fn build_glb_content(
             1 if mat_idx < mat_count => {
                 let base_color_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "diff").unwrap_or_default(),
+                    ktx2::TextureRole::Color,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
                 let normal_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "norm").unwrap_or_default(),
+                    ktx2::TextureRole::Data,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
                 let emissive_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "emis1").unwrap_or_default(),
+                    ktx2::TextureRole::Color,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
                 let occlusion_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "ao").unwrap_or_default(),
+                    ktx2::TextureRole::Data,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
 
@@ -297,16 +310,20 @@ fn build_glb_content(
                 for p in &paths {
                     match slot_from_filename(p) {
                         Some(MaddSlot::Diff) if diff.is_none() => {
-                            diff = load_image(p, &mut buffer_views, &mut bin_buf, &mut images_json);
+                            diff = load_image(p, ktx2::TextureRole::Color,
+                                &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         Some(MaddSlot::Norm) if norm.is_none() => {
-                            norm = load_image(p, &mut buffer_views, &mut bin_buf, &mut images_json);
+                            norm = load_image(p, ktx2::TextureRole::Data,
+                                &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         Some(MaddSlot::Emis) if emis.is_none() => {
-                            emis = load_image(p, &mut buffer_views, &mut bin_buf, &mut images_json);
+                            emis = load_image(p, ktx2::TextureRole::Color,
+                                &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         Some(MaddSlot::Ao) if ao.is_none() => {
-                            ao = load_image(p, &mut buffer_views, &mut bin_buf, &mut images_json);
+                            ao = load_image(p, ktx2::TextureRole::Data,
+                                &mut buffer_views, &mut bin_buf, &mut images_json);
                         }
                         _ => {} // _spec / unknown / slot already filled
                     }
