@@ -1,0 +1,15 @@
+/target/
+**/*.rs.bk
+
+.direnv/
+.ezrc
+.envrc
+
+.*
+
+!.git/
+!.gitignore
+!.envrc.example
+!flake.nix
+!flake.lock
+!.cargo/

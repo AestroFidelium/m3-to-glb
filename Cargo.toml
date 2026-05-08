@@ -1,0 +1,69 @@
+[package]
+name = "m3-to-glb"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+ahash = "0.8"
+crossbeam-channel = "0.5"
+dirs-next = "2"
+memchr = "2"
+mimalloc = { version = "0.1", default-features = false }
+multiversion = "0.7"
+rayon = "1"
+smallvec = { version = "1", features = ["union"] }
+wide = "0.7"
+tracing = "0.1"
+log = "0.4"
+indicatif = "0.17"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-indicatif = "0.3"
+bumpalo = { version = "3", features = ["collections"] }
+memmap2 = "0.9"
+vek = { version = "0.17", features = ["bytemuck"] }
+bytemuck = { version = "1", features = ["derive"] }
+aho-corasick = "1"
+simdutf8 = "0.1"
+xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
+lz4_flex = "0.11"
+zstd = "0.13"
+anstream = "0.6"
+color-print = "0.3"
+clap = { version = "4", features = ["derive", "color", "string"] }
+
+[build-dependencies]
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Заглушаем ложные варнинги от multiversion про retpoline cfg.
+# Это шум самого крейта, не наш код.
+# ──────────────────────────────────────────────────────────────────────────────
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(retpoline)',
+  'cfg(retpoline, values("indirect-branches", "indirect-calls"))',
+] }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Release: максимальные оптимизации
+# lto = "fat"      → межкрейтовый инлайн SIMD кода
+# codegen-units = 1 → одна единица компиляции, лучший инлайн
+# panic = "abort"  → убираем unwind overhead
+# strip = "symbols" → меньший бинарник
+# ──────────────────────────────────────────────────────────────────────────────
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Зависимости в dev тоже с оптимизациями (rayon, wide быстрее)
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3

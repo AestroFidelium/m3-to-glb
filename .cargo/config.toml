@@ -1,0 +1,23 @@
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"      # Link Time Optimization
+codegen-units = 1 # лучше инлайнинг, медленнее сборка
+panic = "abort"   # убирает unwinding overhead
+strip = true      # убрать debug символы
+
+[profile.dev]
+opt-level = 0                 # быстрая компиляция
+codegen-backend = "cranelift" # включить если есть nightly
+
+[profile.dev.package."*"]
+opt-level = 3 # зависимости всегда оптимизированы
+
+[unstable]
+codegen-backend = true
+
+[build]
+rustflags = ["-Z", "polonius"]
