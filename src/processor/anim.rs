@@ -55,7 +55,8 @@ pub struct Sampler {
     /// Frame timestamps in seconds (ms→s, divide by 1000).
     pub times_sec: Vec<f32>,
     pub data:      SamplerData,
-    /// 0 = STEP (constant), 1 = LINEAR. We default to LINEAR.
+    /// LINEAR vs STEP. For bone TRS we always use LINEAR — see
+    /// [`build_vec3_sampler`] / [`build_quat_sampler`] for the reasoning.
     pub linear:    bool,
 }
 
@@ -330,10 +331,16 @@ fn build_one_animation(
 fn build_vec3_sampler(
     m3:           &M3File<'_>,
     block:        &Sd3v,
-    interpolation: u16,
+    _interpolation: u16,
     apply_zy:     bool,
     is_scale:     bool,
 ) -> Result<Option<Sampler>> {
+    // m3studio (`io_m3_import.py:577`/`603`) hardcodes LINEAR for bone
+    // translation/scale FCurves regardless of `header.interpolation`.
+    // The M3 field reads 0 ("constant") for essentially every bone
+    // channel — it's a vestigial engine flag, not a real instruction.
+    // Honoring it would emit STEP everywhere and produce frame-by-frame
+    // pop instead of smooth motion.
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
     let values    = m3.read_ref_vec3(&block.keys).unwrap_or_default();
     if frames_ms.is_empty() || values.is_empty() { return Ok(None); }
@@ -356,16 +363,18 @@ fn build_vec3_sampler(
     Ok(Some(Sampler {
         times_sec,
         data: SamplerData::Vec3(data),
-        linear: interpolation != 0,
+        linear: true,
     }))
 }
 
 fn build_quat_sampler(
     m3:            &M3File<'_>,
     block:         &Sd4q,
-    interpolation: u16,
+    _interpolation: u16,
     apply_zy:      bool,
 ) -> Result<Option<Sampler>> {
+    // See note in `build_vec3_sampler`: bone rotation always interpolates
+    // LINEAR. m3studio does the same (`io_m3_import.py:590`).
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
     let values    = m3.read_ref_quat(&block.keys).unwrap_or_default();
     if frames_ms.is_empty() || values.is_empty() { return Ok(None); }
@@ -377,17 +386,42 @@ fn build_quat_sampler(
     let mut data: Vec<[f32; 4]> = Vec::with_capacity(keep.len());
     for &i in &keep {
         let q = values[i];
-        let arr = if apply_zy {
+        let raw = if apply_zy {
             quat_mul(ZY_QUAT, [q.x, q.y, q.z, q.w])
         } else {
             [q.x, q.y, q.z, q.w]
         };
-        data.push(arr);
+        data.push(quat_normalize(raw));
+    }
+
+    // Quaternion sign correction: q and -q represent the same rotation, but
+    // glTF LINEAR interpolation lerps component-wise. If two consecutive
+    // samples land on opposite hemispheres (dot < 0), lerp passes through
+    // (or near) identity and the bone snaps the long way around. Mirror the
+    // hemisphere of every sample to its predecessor.
+    for i in 1..data.len() {
+        let prev = data[i - 1];
+        let cur  = data[i];
+        let dot = prev[0] * cur[0] + prev[1] * cur[1] + prev[2] * cur[2] + prev[3] * cur[3];
+        if dot < 0.0 {
+            data[i] = [-cur[0], -cur[1], -cur[2], -cur[3]];
+        }
     }
 
     Ok(Some(Sampler {
         times_sec,
         data: SamplerData::Quat(data),
-        linear: interpolation != 0,
+        linear: true,
     }))
+}
+
+#[inline]
+fn quat_normalize(q: [f32; 4]) -> [f32; 4] {
+    let len_sq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+    if len_sq > 1e-12 {
+        let inv = 1.0 / len_sq.sqrt();
+        [q[0] * inv, q[1] * inv, q[2] * inv, q[3] * inv]
+    } else {
+        [0.0, 0.0, 0.0, 1.0] // identity quaternion
+    }
 }
