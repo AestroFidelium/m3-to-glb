@@ -258,17 +258,22 @@ fn convert_division(
         // glTF can't express per-primitive animated visibility, so we match the
         // rest pose and skip geometry hidden by default.
         let batch = region_first_batch.get(ri).copied().flatten().and_then(|bi| batches.get(bi));
+        let material = region_to_mat.get(ri).copied().flatten();
         let hidden = region_hidden_by_default(region, regn_version, batch, bones);
+        // A region whose batch resolves to no representable material
+        // (unsupported type: DIS_/CMP_/particle/…) would render with glTF's
+        // default white material — stray white panels. Match the reference,
+        // which drops unsupported-material geometry, and skip it.
+        let skip = hidden || material.is_none();
 
         debug!(
-            "  Region[{}]: first_vtx={} count={} stride={} first_face={} num_faces={} mat={:?} bone={:?} hidden={}",
+            "  Region[{}]: first_vtx={} count={} stride={} first_face={} num_faces={} mat={:?} bone={:?} hidden={} skip={}",
             ri, first, count, stride,
             region.first_face_index, region.face_count,
-            region_to_mat.get(ri).copied().flatten(),
-            batch.map(|b| b.bone), hidden,
+            material, batch.map(|b| b.bone), hidden, skip,
         );
 
-        if hidden { continue; }
+        if skip { continue; }
 
         // Positions (offset=0 always).
         transform::extract_positions_to_soa(vertex_data, first, count, stride, &mut soa)?;
@@ -354,7 +359,7 @@ fn convert_division(
         soa.region_primitives.push(crate::processor::soa::RegionPrimitiveInfo {
             index_start,
             index_count,
-            material_index: region_to_mat.get(ri).copied().flatten(),
+            material_index: material,
         });
     }
 
