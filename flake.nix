@@ -106,6 +106,7 @@
             pkgs.cargo-show-asm # `cargo asm` — inspect what the compiler emitted
             pkgs.cargo-llvm-lines # find what bloats the binary
             pkgs.cargo-nextest # fast test runner (up to 3x faster than cargo test)
+            pkgs.cargo-bolero # property + fuzz harness (`cargo bolero test <name>`)
             pkgs.cargo-watch # watcher for scripts and CI
             pkgs.bacon # smart watcher with a TUI
             pkgs.cargo-tarpaulin # code coverage (Linux only)

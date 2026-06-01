@@ -22,7 +22,6 @@ use super::structures::{
 };
 use super::{M3Version, detect_version};
 use anyhow::{Result, ensure};
-use bytemuck::cast_slice;
 use simdutf8::basic::from_utf8;
 use tracing::debug;
 
@@ -33,6 +32,46 @@ const TAG_VERTICES: &[u8; 4] = b"__8U"; // "U8__" — vertices (count = bytes)
 const TAG_INDICES: &[u8; 4] = b"_61U"; // "U16_" — u16 indices
 
 const TAG_BATCHES: &[u8; 4] = b"_TAB"; // "BAT_"
+
+/// Vertex stride (bytes) implied by a MODL `vertex_flags` bitset.
+///
+/// Pure function of the flags — each present component contributes a fixed
+/// number of bytes. Position (`0x1`) is always present (12B). This must stay
+/// in lockstep with [`crate::processor::VertexOffsets::from_flags`]: the
+/// offsets it computes plus each component's size must never exceed this
+/// stride (see the consistency property test in `tests/`).
+pub fn stride_from_flags(flags: u32) -> usize {
+    let mut size: usize = 12; // pos (always present)
+
+    if flags & 0x000020 != 0 { size += 4; } // skin0: 2×(lookup+weight) = 4B
+    if flags & 0x000040 != 0 { size += 4; } // skin1: 2×(lookup+weight) = 4B
+    if flags & 0x000080 != 0 { size += 12; } // normalf (uncompressed normal)
+    if flags & 0x000100 != 0 { size += 4; } // test100
+    if flags & 0x000200 != 0 { size += 4; } // color (COL)
+    if flags & 0x000400 != 0 { size += 4; } // test400
+    if flags & 0x000800 != 0 { size += 4; } // test800
+    if flags & 0x001000 != 0 { size += 4; } // test1000
+    if flags & 0x002000 != 0 { size += 8; } // fuv0 (float vec2)
+    if flags & 0x004000 != 0 { size += 8; } // fuv1
+    if flags & 0x008000 != 0 { size += 8; } // fuv2
+    if flags & 0x010000 != 0 { size += 8; } // fuv3
+    if flags & 0x020000 != 0 { size += 4; } // uv0 (int16×2)
+    if flags & 0x040000 != 0 { size += 4; } // uv1
+    if flags & 0x080000 != 0 { size += 4; } // uv2
+    if flags & 0x100000 != 0 { size += 4; } // uv3
+    if flags & 0x200000 != 0 { size += 12; } // normalf2 (uncompressed normal #2)
+    if flags & 0x400000 != 0 { size += 12; } // tanf (uncompressed tangent)
+    if flags & 0x800000 != 0 { size += 4; } // normal (Vector3As3uint8 + sign)
+    if flags & 0x1000000 != 0 { size += 4; } // tangent (compressed)
+    if flags & 0x2000000 != 0 { size += 4; } // unknown
+    if flags & 0x4000000 != 0 { size += 12; } // unknown
+    if flags & 0x8000000 != 0 { size += 12; } // unknown
+    if flags & 0x10000000 != 0 { size += 4; } // unknown
+    if flags & 0x20000000 != 0 { size += 4; } // unknown
+    if flags & 0x40000000 != 0 { size += 4; } // uv4
+
+    size
+}
 
 pub struct M3File<'data> {
     data: &'data [u8],
@@ -64,13 +103,18 @@ impl<'data> M3File<'data> {
             index_offset,
         );
 
-        let tags_end = index_offset + num_tags * tag_size;
-        ensure!(
-            data.len() >= tags_end,
-            "file truncated: tag table doesn't fit"
-        );
+        // Checked arithmetic: a corrupt `num_tags` must not overflow into a
+        // small, in-bounds `tags_end` (would slice garbage / panic).
+        let tags_end = num_tags
+            .checked_mul(tag_size)
+            .and_then(|n| index_offset.checked_add(n))
+            .filter(|&end| end <= data.len())
+            .ok_or_else(|| anyhow::anyhow!("file truncated: tag table doesn't fit"))?;
 
-        let tags: &[MdIndexEntry] = cast_slice(&data[index_offset..tags_end]);
+        // `try_cast_slice` (not `cast_slice`): a misaligned `index_offset`
+        // would otherwise panic inside bytemuck. Reject it as a parse error.
+        let tags: &[MdIndexEntry] = bytemuck::try_cast_slice(&data[index_offset..tags_end])
+            .map_err(|e| anyhow::anyhow!("tag table not castable ({e})"))?;
 
         Ok(M3File {
             data,
@@ -230,87 +274,7 @@ impl<'data> M3File<'data> {
     pub fn vertex_stride(&self) -> usize {
         let flags = self.vertex_flags();
         debug!("vertex_flags = 0x{:08X}", flags);
-        let mut size: usize = 12; // pos (always present)
-
-        if flags & 0x000020 != 0 {
-            size += 4;
-        } // skin0: 2×(lookup+weight) = 4B
-        if flags & 0x000040 != 0 {
-            size += 4;
-        } // skin1: 2×(lookup+weight) = 4B
-        if flags & 0x000080 != 0 {
-            size += 12;
-        } // unknown
-        if flags & 0x000100 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x000200 != 0 {
-            size += 4;
-        } // color (COL)
-        if flags & 0x000400 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x000800 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x001000 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x002000 != 0 {
-            size += 8;
-        } // fuv0 (float vec2)
-        if flags & 0x004000 != 0 {
-            size += 8;
-        } // fuv1
-        if flags & 0x008000 != 0 {
-            size += 8;
-        } // fuv2
-        if flags & 0x010000 != 0 {
-            size += 8;
-        } // fuv3
-        if flags & 0x020000 != 0 {
-            size += 4;
-        } // uv0 (int16×2)
-        if flags & 0x040000 != 0 {
-            size += 4;
-        } // uv1
-        if flags & 0x080000 != 0 {
-            size += 4;
-        } // uv2
-        if flags & 0x100000 != 0 {
-            size += 4;
-        } // uv3
-        if flags & 0x200000 != 0 {
-            size += 12;
-        } // normal as vec3 float?
-        if flags & 0x400000 != 0 {
-            size += 12;
-        } // tangent as vec3 float?
-        if flags & 0x800000 != 0 {
-            size += 4;
-        } // normal (Vector3As3uint8 + sign)
-        if flags & 0x1000000 != 0 {
-            size += 4;
-        } // tangent
-        if flags & 0x2000000 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x4000000 != 0 {
-            size += 12;
-        } // unknown
-        if flags & 0x8000000 != 0 {
-            size += 12;
-        } // unknown
-        if flags & 0x10000000 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x20000000 != 0 {
-            size += 4;
-        } // unknown
-        if flags & 0x40000000 != 0 {
-            size += 4;
-        } // uv4
-
+        let size = stride_from_flags(flags);
         debug!("vertex_stride from flags: {} bytes", size);
         size
     }

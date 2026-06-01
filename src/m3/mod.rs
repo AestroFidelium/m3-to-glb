@@ -23,7 +23,7 @@
 pub mod structures;
 pub mod reader;
 
-pub use reader::M3File;
+pub use reader::{M3File, stride_from_flags};
 
 use anyhow::{bail, Result};
 

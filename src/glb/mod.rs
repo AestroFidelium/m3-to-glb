@@ -522,6 +522,11 @@ fn build_glb_content(
         } else {
             ([t.x, t.y, t.z], [r.x, r.y, r.z, r.w])
         };
+        // M3 rest quaternions are only approximately unit-length, and the
+        // Z-up→Y-up compose above can push a component past ±1 (e.g.
+        // 1.0000001 on War3_Kelthuzad's root). glTF rejects that, so every
+        // node rotation we emit is normalized and clamped.
+        let rotation = crate::quat::normalize_and_clamp(rotation);
 
         nodes.push(json_builder::GltfNode {
             name:        Some(if name.is_empty() { format!("bone_{}", bi) } else { name }),

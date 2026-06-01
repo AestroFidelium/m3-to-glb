@@ -41,6 +41,15 @@ tempfile = "3"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Test / fuzz tooling.
+# `bolero` tests double as deterministic `cargo test` replays AND as real
+# fuzzing via `cargo bolero test <name>` (libfuzzer engine). The `arbitrary`
+# feature lets fuzz targets take structured inputs in addition to raw `&[u8]`.
+# ──────────────────────────────────────────────────────────────────────────────
+[dev-dependencies]
+bolero = { version = "0.13", features = ["arbitrary"] }
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Silence false-positive warnings from `multiversion` about its retpoline cfg.
@@ -65,6 +74,21 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fuzzing profile for `cargo bolero test`.
+# Distinct from `dev` so it does NOT pick up the cranelift backend pinned to
+# `[profile.dev]` in `.cargo/config.toml` — sanitizer-coverage needs the LLVM
+# backend. debug-assertions + overflow-checks turn silent UB into crashes the
+# fuzzer can catch.
+# ──────────────────────────────────────────────────────────────────────────────
+[profile.fuzz]
+inherits = "dev"
+opt-level = 3
+codegen-units = 1
+incremental = false
+debug-assertions = true
+overflow-checks = true
 
 # Dev dependencies stay optimised (rayon, wide are noticeably faster).
 [profile.dev.package."*"]

@@ -15,11 +15,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 // ─────────────────────────────────────────────────────────────────────────────
 
-mod assets;
-mod cli;
-mod glb;
-mod m3;
-mod processor;
+use m3_to_glb::{assets, cli, glb, m3, processor};
 
 use anyhow::{Context, Result};
 use cli::Cli;

@@ -391,7 +391,7 @@ fn build_quat_sampler(
         } else {
             [q.x, q.y, q.z, q.w]
         };
-        data.push(quat_normalize(raw));
+        data.push(crate::quat::normalize(raw));
     }
 
     // Quaternion sign correction: q and -q represent the same rotation, but
@@ -415,13 +415,3 @@ fn build_quat_sampler(
     }))
 }
 
-#[inline]
-fn quat_normalize(q: [f32; 4]) -> [f32; 4] {
-    let len_sq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
-    if len_sq > 1e-12 {
-        let inv = 1.0 / len_sq.sqrt();
-        [q[0] * inv, q[1] * inv, q[2] * inv, q[3] * inv]
-    } else {
-        [0.0, 0.0, 0.0, 1.0] // identity quaternion
-    }
-}
