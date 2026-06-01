@@ -27,8 +27,11 @@ pub struct BufferView {
 pub struct Primitive {
     pub position_accessor: usize,
     pub normal_accessor:   usize,
-    pub tangent_accessor:  usize,
-    pub texcoord_accessor: usize,
+    // TANGENT is only emitted when the material has a normal texture, and
+    // TEXCOORD_0 only when the material samples some texture — otherwise the
+    // glTF validator flags them as UNUSED (tangent/object).
+    pub tangent_accessor:  Option<usize>,
+    pub texcoord_accessor: Option<usize>,
     pub indices_accessor:  usize,
     pub material:          Option<usize>,
     pub joints_accessor:   Option<usize>,
@@ -186,12 +189,16 @@ pub fn build_json(
                 j.push('{');
                 write!(
                     j,
-                    r#""attributes":{{"POSITION":{},"NORMAL":{},"TANGENT":{},"TEXCOORD_0":{}"#,
+                    r#""attributes":{{"POSITION":{},"NORMAL":{}"#,
                     prim.position_accessor,
                     prim.normal_accessor,
-                    prim.tangent_accessor,
-                    prim.texcoord_accessor,
                 ).unwrap();
+                if let Some(t_acc) = prim.tangent_accessor {
+                    write!(j, r#","TANGENT":{}"#, t_acc).unwrap();
+                }
+                if let Some(uv_acc) = prim.texcoord_accessor {
+                    write!(j, r#","TEXCOORD_0":{}"#, uv_acc).unwrap();
+                }
                 if let Some(j_acc) = prim.joints_accessor {
                     write!(j, r#","JOINTS_0":{}"#, j_acc).unwrap();
                 }

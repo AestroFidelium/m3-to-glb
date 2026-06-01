@@ -105,6 +105,30 @@ pub fn pack_and_write(
 }
 
 /// Convenience helper to build an Accessor with default `normalized=false`.
+/// Which optional vertex attributes a primitive should reference, given its
+/// material. TANGENT is only meaningful with a normal texture; TEXCOORD_0 only
+/// when the material samples some texture. Emitting them otherwise trips the
+/// glTF validator's UNUSED_MESH_TANGENT / UNUSED_OBJECT notices.
+fn prim_attr_accessors(
+    material_idx: Option<usize>,
+    materials:    &[json_builder::GltfMaterial],
+    tangent_acc:  usize,
+    texcoord_acc: usize,
+) -> (Option<usize>, Option<usize>) {
+    let mat = material_idx.and_then(|mi| materials.get(mi));
+    let has_normal = mat.is_some_and(|m| m.normal_texture.is_some());
+    let has_any_texture = mat.is_some_and(|m| {
+        m.base_color_texture.is_some()
+            || m.normal_texture.is_some()
+            || m.emissive_texture.is_some()
+            || m.occlusion_texture.is_some()
+    });
+    (
+        has_normal.then_some(tangent_acc),
+        has_any_texture.then_some(texcoord_acc),
+    )
+}
+
 fn acc(
     bv: usize, off: usize, ct: u32, count: usize, ty: &str,
     min: Option<Vec<f64>>, max: Option<Vec<f64>>,
@@ -433,12 +457,14 @@ fn build_glb_content(
 
                 let material_idx = rp.material_index
                     .and_then(|mi| matref_remap.get(mi).copied().flatten());
+                let (tangent_accessor, texcoord_accessor) =
+                    prim_attr_accessors(material_idx, &materials_json, tang_acc_idx, uv_acc_idx);
 
                 primitives.push(json_builder::Primitive {
                     position_accessor: pos_acc_idx,
                     normal_accessor:   norm_acc_idx,
-                    tangent_accessor:  tang_acc_idx,
-                    texcoord_accessor: uv_acc_idx,
+                    tangent_accessor,
+                    texcoord_accessor,
                     indices_accessor:  idx_acc_idx,
                     material:          material_idx,
                     joints_accessor:   joints_acc_idx,
@@ -458,12 +484,14 @@ fn build_glb_content(
             } else {
                 None
             };
+            let (tangent_accessor, texcoord_accessor) =
+                prim_attr_accessors(material_idx, &materials_json, tang_acc_idx, uv_acc_idx);
 
             primitives.push(json_builder::Primitive {
                 position_accessor: pos_acc_idx,
                 normal_accessor:   norm_acc_idx,
-                tangent_accessor:  tang_acc_idx,
-                texcoord_accessor: uv_acc_idx,
+                tangent_accessor,
+                texcoord_accessor,
                 indices_accessor:  idx_acc_idx,
                 material:          material_idx,
                 joints_accessor:   joints_acc_idx,
@@ -983,4 +1011,52 @@ fn slot_from_filename(path: &str) -> Option<MaddSlot> {
     else if stem.ends_with("_emis") || stem.ends_with("_emis1") || stem.ends_with("_emis2") { Some(MaddSlot::Emis) }
     else if stem.ends_with("_ao")   { Some(MaddSlot::Ao)   }
     else { None }
+}
+
+#[cfg(test)]
+mod attr_tests {
+    use super::prim_attr_accessors;
+    use super::json_builder::GltfMaterial;
+
+    fn mat(base: Option<usize>, normal: Option<usize>) -> GltfMaterial {
+        GltfMaterial {
+            name:               "m".into(),
+            base_color_texture: base,
+            normal_texture:     normal,
+            emissive_texture:   None,
+            occlusion_texture:  None,
+            metallic_factor:    0.0,
+            roughness_factor:   1.0,
+            emissive_factor:    [0.0; 3],
+            alpha_mode:         None,
+            alpha_cutoff:       0.5,
+            double_sided:       false,
+        }
+    }
+
+    #[test]
+    fn base_and_normal_keeps_both() {
+        let mats = [mat(Some(0), Some(1))];
+        assert_eq!(prim_attr_accessors(Some(0), &mats, 7, 9), (Some(7), Some(9)));
+    }
+
+    #[test]
+    fn base_only_drops_tangent_keeps_uv() {
+        let mats = [mat(Some(0), None)];
+        assert_eq!(prim_attr_accessors(Some(0), &mats, 7, 9), (None, Some(9)));
+    }
+
+    #[test]
+    fn no_textures_drops_both() {
+        let mats = [mat(None, None)];
+        assert_eq!(prim_attr_accessors(Some(0), &mats, 7, 9), (None, None));
+    }
+
+    #[test]
+    fn no_material_drops_both() {
+        let mats = [mat(Some(0), Some(1))];
+        assert_eq!(prim_attr_accessors(None, &mats, 7, 9), (None, None));
+        // out-of-range index is also treated as no material
+        assert_eq!(prim_attr_accessors(Some(5), &mats, 7, 9), (None, None));
+    }
 }
