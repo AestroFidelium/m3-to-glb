@@ -23,12 +23,11 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 
     debug!("vertex_flags=0x{:08X} stride={} offsets={:?}", vertex_flags, stride, offsets);
 
-    // Read material references, bone_lookup, and bones once. Bones carry the
-    // per-bone `batching` toggle that BAT_ records reference to hide geometry
-    // by default (e.g. death-decay gore shown only during a Death animation).
-    let mat_refs    = m3.material_references().unwrap_or_default();
-    let bone_lookup = m3.bone_lookup().unwrap_or_default();
-    let bones       = m3.bones().unwrap_or_default();
+    // Read material references and bone_lookup once. `resolved_refs` maps each
+    // MATM index to a renderable one, following CMP_ composites to their base
+    // section (the reference importer renders composite-material geometry too).
+    let resolved_refs = m3.resolved_material_refs();
+    let bone_lookup   = m3.bone_lookup().unwrap_or_default();
 
     // Gather regions / indices / batches sequentially (M3File is not Sync),
     // then convert each Division in parallel via rayon.
@@ -53,8 +52,8 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
             );
             let mut soa = convert_division(
                 &vertex_data, stride, &offsets,
-                &regions, regn_version, &indices, &batches, &mat_refs,
-                &bone_lookup, &bones,
+                &regions, regn_version, &indices, &batches, &resolved_refs,
+                &bone_lookup,
             )?;
             // M3 stores models Z-up; glTF is Y-up. Bake the -90° rotation
             // around X into positions / normals / tangents / AABB. For
@@ -165,40 +164,6 @@ impl VertexOffsets {
     }
 }
 
-// ─── Default-pose batch visibility ─────────────────────────────────────────────
-
-/// Whether a region's geometry is hidden in the rest pose.
-///
-/// Mirrors the M3 batch-toggle mechanism (`structures.xml`): a `BAT_` names a
-/// toggle `bone`; that bone's `batching` flag (a `FlagAnimationReferenceV0`)
-/// gates the batch. When the bone carries an *animated* batching property whose
-/// default value is 0, the batch is off by default and only shown by specific
-/// animations (death gore, trails, etc.). REGN v4+ additionally has explicit
-/// `hidden` / `placeholder` flag bits.
-fn region_hidden_by_default(
-    region:       &crate::m3::structures::Regn,
-    regn_version: u32,
-    batch:        Option<&crate::m3::structures::Bat>,
-    bones:        &[crate::m3::structures::Bone],
-) -> bool {
-    // REGN v4+ explicit flags: 0x1 hidden, 0x2 placeholder.
-    if regn_version >= 4 && (region.flags & 0x3) != 0 {
-        return true;
-    }
-    if let Some(b) = batch {
-        if b.bone >= 0 {
-            if let Some(bone) = bones.get(b.bone as usize) {
-                let h = &bone.batching.header;
-                let animated = h.flags != 0 || h.id != 0;
-                if animated && bone.batching.default == 0 {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
 // ─── Single-Division conversion ──────────────────────────────────────────────
 
 fn convert_division(
@@ -207,11 +172,10 @@ fn convert_division(
     offsets:      &VertexOffsets,
     regions:      &[crate::m3::structures::Regn],
     regn_version: u32,
-    indices:      &[u16],
-    batches:      &[crate::m3::structures::Bat],
-    mat_refs:     &[crate::m3::structures::Matm],
-    bone_lookup:  &[u16],
-    bones:        &[crate::m3::structures::Bone],
+    indices:       &[u16],
+    batches:       &[crate::m3::structures::Bat],
+    resolved_refs: &[Option<usize>],
+    bone_lookup:   &[u16],
 ) -> Result<MeshDataSoA> {
     let mut soa = MeshDataSoA::new();
 
@@ -221,25 +185,17 @@ fn convert_division(
     // wears the first material (the rest are bone-toggling metadata that
     // glTF can't express). So pick the FIRST batch of each region.
     //
-    // The stored value is the MATM-record INDEX, not a MAT_/MADD index.
-    // glb/mod.rs reads `matm[idx].mat_type` and dispatches to MAT_ (type 1)
-    // or MADD (type 12). Both are accepted here; everything else
-    // (DIS_/CMP_/...) stays None.
+    // The stored value is the renderable MATM-record INDEX (`resolved_refs`
+    // has already followed CMP_ composites to a MAT_/MADD base). glb/mod.rs
+    // reads `matm[idx].mat_type` and dispatches to MAT_ (type 1) / MADD (12).
+    // Unrepresentable types (volume/displacement/…) resolve to None.
     let mut region_to_mat: Vec<Option<usize>> = vec![None; regions.len()];
-    let mut region_first_batch: Vec<Option<usize>> = vec![None; regions.len()];
-    for (bi, batch) in batches.iter().enumerate() {
+    for batch in batches.iter() {
         let ridx = batch.region_index as usize;
         if ridx >= regions.len() { continue; }
-        if region_first_batch[ridx].is_none() {
-            region_first_batch[ridx] = Some(bi);
-        }
         if region_to_mat[ridx].is_none() {
             let mref_idx = batch.material_reference_index as usize;
-            if let Some(mref) = mat_refs.get(mref_idx) {
-                if mref.mat_type == 1 || mref.mat_type == 12 {
-                    region_to_mat[ridx] = Some(mref_idx);
-                }
-            }
+            region_to_mat[ridx] = resolved_refs.get(mref_idx).copied().flatten();
         }
     }
 
@@ -248,29 +204,20 @@ fn convert_division(
         let count = region.vertex_count as usize;
         if count == 0 { continue; }
 
-        // Default-pose visibility. M3 geometry that should only appear during a
-        // specific animation (death-decay gore, weapon trails, alt-damage skins)
-        // is toggled off in the rest pose via:
-        //   * REGN v4+ `hidden`/`placeholder` flag bits, or
-        //   * the batch's toggle bone (`BAT_.bone` → `Bone.batching`): when that
-        //     bone carries an animated batching property whose default flag is 0,
-        //     the batch is OFF by default.
-        // glTF can't express per-primitive animated visibility, so we match the
-        // rest pose and skip geometry hidden by default.
-        let batch = region_first_batch.get(ri).copied().flatten().and_then(|bi| batches.get(bi));
+        // Visibility. We match the reference importer (io_m3_import.py:1055),
+        // which renders every region that has a batch — it does NOT consult the
+        // batch toggle bone / REGN flags (those gate per-animation visibility,
+        // which glTF can't express anyway). The one thing we drop is a region
+        // whose material is an unrepresentable type (resolves to None) — that
+        // would otherwise render with glTF's default white material.
         let material = region_to_mat.get(ri).copied().flatten();
-        let hidden = region_hidden_by_default(region, regn_version, batch, bones);
-        // A region whose batch resolves to no representable material
-        // (unsupported type: DIS_/CMP_/particle/…) would render with glTF's
-        // default white material — stray white panels. Match the reference,
-        // which drops unsupported-material geometry, and skip it.
-        let skip = hidden || material.is_none();
+        let skip = material.is_none();
 
         debug!(
-            "  Region[{}]: first_vtx={} count={} stride={} first_face={} num_faces={} mat={:?} bone={:?} hidden={} skip={}",
+            "  Region[{}]: first_vtx={} count={} stride={} first_face={} num_faces={} mat={:?} skip={}",
             ri, first, count, stride,
             region.first_face_index, region.face_count,
-            material, batch.map(|b| b.bone), hidden, skip,
+            material, skip,
         );
 
         if skip { continue; }
@@ -366,67 +313,3 @@ fn convert_division(
     Ok(soa)
 }
 
-#[cfg(test)]
-mod visibility_tests {
-    use super::region_hidden_by_default;
-    use crate::m3::structures::{Bat, Bone, Regn};
-    use bytemuck::Zeroable;
-
-    fn toggle_bone(animated: bool, default: u32) -> Bone {
-        let mut b = Bone::zeroed();
-        if animated {
-            b.batching.header.flags = 6; // "valid animation" per structures.xml
-            b.batching.header.id = 0x1234;
-        }
-        b.batching.default = default;
-        b
-    }
-    fn batch_for(bone: i16) -> Bat {
-        let mut bat = Bat::zeroed();
-        bat.bone = bone;
-        bat
-    }
-
-    #[test]
-    fn visible_when_no_batch() {
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, None, &[]));
-    }
-
-    #[test]
-    fn regn_v4_hidden_or_placeholder_flag() {
-        let mut r = Regn::zeroed();
-        r.flags = 0x1; // hidden
-        assert!(region_hidden_by_default(&r, 4, None, &[]));
-        r.flags = 0x2; // placeholder
-        assert!(region_hidden_by_default(&r, 4, None, &[]));
-        // The flags field doesn't exist before v4 — must be ignored.
-        assert!(!region_hidden_by_default(&r, 3, None, &[]));
-    }
-
-    #[test]
-    fn animated_toggle_default_off_is_hidden() {
-        // War3_Kelthuzad's gore region: animated batching, default flag 0.
-        let bones = [toggle_bone(true, 0)];
-        assert!(region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
-    }
-
-    #[test]
-    fn animated_toggle_default_on_is_visible() {
-        let bones = [toggle_bone(true, 1)];
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
-    }
-
-    #[test]
-    fn static_toggle_is_visible_even_if_default_zero() {
-        // No animation on the batching property → always-on (the common case,
-        // e.g. the body batch on root bone 0).
-        let bones = [toggle_bone(false, 0)];
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
-    }
-
-    #[test]
-    fn negative_or_oob_bone_is_visible() {
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(-1)), &[]));
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(99)), &[]));
-    }
-}

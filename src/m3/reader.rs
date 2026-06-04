@@ -17,8 +17,8 @@
 //! Instead we look up tags directly by their LE name.
 
 use super::structures::{
-    Bat, Bone, Div, Iref, Layr, MdIndexEntry, Quat, Reference, Regn, Schr, Sd3v, Sd4q, Seqs,
-    SeqsV1, Stc, Stg, Vec3,
+    Bat, Bone, Cmp, Cms, Div, Iref, Layr, Matm, MdIndexEntry, Quat, Reference, Regn, Schr, Sd3v,
+    Sd4q, Seqs, SeqsV1, Stc, Stg, Vec3,
 };
 use super::{M3Version, detect_version};
 use anyhow::{Result, ensure};
@@ -394,11 +394,59 @@ impl<'data> M3File<'data> {
     // ── Materials ───────────────────────────────────────────────────────────
 
     /// Material references (MATM, tag b"MTAM").
-    pub fn material_references(&self) -> Result<Vec<crate::m3::structures::Matm>> {
+    pub fn material_references(&self) -> Result<Vec<Matm>> {
         match self.find_tag(b"MTAM") {
-            Some(idx) => self.read_tag_slice::<crate::m3::structures::Matm>(idx),
+            Some(idx) => self.read_tag_slice::<Matm>(idx),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// Composite materials (CMP_, tag b"_PMC").
+    fn composites(&self) -> Vec<Cmp> {
+        match self.find_tag(b"_PMC") {
+            Some(idx) => self.read_tag_slice::<Cmp>(idx).unwrap_or_default(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Resolve a MATM index to a *renderable* MATM index (`MAT_`=1 / `MADD`=12).
+    ///
+    /// Composite materials (`CMP_`, type 3) layer several sub-materials; glTF
+    /// can't express that compositing, so — like the reference importer, which
+    /// renders the geometry regardless — we fall back to the first section's
+    /// base material (the diffuse base). Returns `None` for material types we
+    /// can't represent at all (volume, displacement, …).
+    fn resolve_matref_inner(
+        &self,
+        matms:      &[Matm],
+        composites: &[Cmp],
+        idx:        usize,
+        depth:      u8,
+    ) -> Option<usize> {
+        if depth > 8 { return None; }
+        let matm = matms.get(idx)?;
+        match matm.mat_type {
+            1 | 12 => Some(idx),
+            3 => {
+                let cmp = composites.get(matm.material_index as usize)?;
+                let sections = self.read_ref_slice::<Cms>(&cmp.sections).ok()?;
+                let first = sections.first()?;
+                self.resolve_matref_inner(
+                    matms, composites, first.material_reference_index as usize, depth + 1,
+                )
+            }
+            _ => None,
+        }
+    }
+
+    /// For every MATM entry, the renderable MATM index it resolves to (following
+    /// `CMP_` composites), or `None` if unrepresentable. Indexed by MATM index.
+    pub fn resolved_material_refs(&self) -> Vec<Option<usize>> {
+        let matms = self.material_references().unwrap_or_default();
+        let composites = self.composites();
+        (0..matms.len())
+            .map(|i| self.resolve_matref_inner(&matms, &composites, i, 0))
+            .collect()
     }
 
     /// Offset of the named layer inside MAT_ for the given version.
