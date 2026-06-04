@@ -46,6 +46,7 @@ pub struct GltfImage {
 pub struct GltfMaterial {
     pub name:               String,
     pub base_color_texture: Option<usize>,
+    pub base_color_factor:  [f32; 4],
     pub normal_texture:     Option<usize>,
     pub emissive_texture:   Option<usize>,
     pub occlusion_texture:  Option<usize>,
@@ -231,6 +232,11 @@ pub fn build_json(
             if let Some(tex_idx) = mat.base_color_texture {
                 write!(j, r#","baseColorTexture":{{"index":{}}}"#, tex_idx).unwrap();
             }
+            if mat.base_color_factor != [1.0, 1.0, 1.0, 1.0] {
+                let f = mat.base_color_factor;
+                write!(j, r#","baseColorFactor":[{},{},{},{}]"#,
+                    format_f32(f[0]), format_f32(f[1]), format_f32(f[2]), format_f32(f[3])).unwrap();
+            }
             j.push('}');
             if let Some(tex_idx) = mat.normal_texture {
                 write!(j, r#","normalTexture":{{"index":{}}}"#, tex_idx).unwrap();
@@ -240,6 +246,8 @@ pub fn build_json(
             }
             if let Some(tex_idx) = mat.emissive_texture {
                 write!(j, r#","emissiveTexture":{{"index":{}}}"#, tex_idx).unwrap();
+            }
+            if mat.emissive_factor != [0.0, 0.0, 0.0] {
                 write!(j, r#","emissiveFactor":[{},{},{}]"#,
                     format_f32(mat.emissive_factor[0]),
                     format_f32(mat.emissive_factor[1]),

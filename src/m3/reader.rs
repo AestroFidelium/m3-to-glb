@@ -696,6 +696,39 @@ impl<'data> M3File<'data> {
         Ok(s.to_owned())
     }
 
+    /// Flat color of a material layer, as linear-ish RGBA in 0..1, when the
+    /// layer is a *color* layer (LAYR `flags` bit 0x400 set) rather than a
+    /// bitmap. m3studio uses this (`layer.color_type = 'COLOR'`) for effect
+    /// materials that have no texture — e.g. an additive energy glow whose
+    /// color lives in `color_value`, not a `.dds`. Returns `None` for ordinary
+    /// bitmap/empty layers.
+    ///
+    /// LAYR layout: id(4) + color_bitmap Ref(12) + color_value(20) + flags(4).
+    /// `color_value` is a `ColorAnimationReferenceV0`: header(8) + default
+    /// COL(b,g,r,a @ +24) + null COL(4) + unused(4); `flags` follows at +36.
+    pub fn layer_color(&self, mat_idx: usize, layer: &str) -> Option<[f32; 4]> {
+        let layer_ref = self.mat_layer_ref(mat_idx, layer)?;
+        let tag_idx = layer_ref.index as usize;
+        if layer_ref.entries == 0 || tag_idx >= self.tags.len() {
+            return None;
+        }
+        let start = self.tags[tag_idx].offset as usize;
+        if start + 40 > self.data.len() {
+            return None;
+        }
+        let rd = |o: usize| u32::from_le_bytes(self.data[start + o..start + o + 4].try_into().unwrap());
+        let flags = rd(36);
+        if flags & 0x400 == 0 {
+            return None; // not a color layer
+        }
+        let c = rd(24); // default COL: b,g,r,a (little-endian byte order)
+        let b = (c & 0xff) as f32 / 255.0;
+        let g = ((c >> 8) & 0xff) as f32 / 255.0;
+        let r = ((c >> 16) & 0xff) as f32 / 255.0;
+        let a = ((c >> 24) & 0xff) as f32 / 255.0;
+        Some([r, g, b, a])
+    }
+
     /// Reference to layer_diff for material `mat_idx`. Backwards-compat helper.
     pub fn mat_layer_diff_ref(&self, mat_idx: usize) -> Option<Reference> {
         self.mat_layer_ref(mat_idx, "diff")

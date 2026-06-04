@@ -266,8 +266,9 @@ fn build_glb_content(
         let glt = match matm.mat_type {
             // ── Standard MAT_ ────────────────────────────────────────────────
             1 if mat_idx < mat_count => {
+                let diff_path = m3.texture_path_for_layer(mat_idx, "diff").unwrap_or_default();
                 let base_color_tex = load_image(
-                    &m3.texture_path_for_layer(mat_idx, "diff").unwrap_or_default(),
+                    &diff_path,
                     ktx2::TextureRole::Color,
                     &mut buffer_views, &mut bin_buf, &mut images_json,
                 );
@@ -303,15 +304,34 @@ fn build_glb_content(
                     (None, 0.5)
                 };
                 let double_sided = (mat_flags & 0x8) != 0;
+
+                // Flat-color layers (LAYR color bit, no bitmap). m3studio renders
+                // these — e.g. an additive energy glow whose color is in
+                // `color_value`. Map diffuse-color → baseColorFactor and
+                // emissive-color → emissiveFactor.
                 let emissive_factor = if emissive_tex.is_some() {
                     [1.0f32, 1.0f32, 1.0f32]
+                } else if let Some(c) = m3.layer_color(mat_idx, "emis1") {
+                    [c[0], c[1], c[2]]
                 } else {
                     [0.0f32; 3]
+                };
+                // Base color: a diffuse bitmap modulates white; a diffuse color
+                // layer supplies the flat color; a material with neither has no
+                // albedo source — default to black, not glTF's white (otherwise
+                // textureless effect geometry renders as stray white panels).
+                let base_color_factor = if base_color_tex.is_some() || !diff_path.is_empty() {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else if let Some(c) = m3.layer_color(mat_idx, "diff") {
+                    c
+                } else {
+                    [0.0, 0.0, 0.0, 1.0]
                 };
 
                 json_builder::GltfMaterial {
                     name:               format!("material_{}", mat_idx),
                     base_color_texture: base_color_tex,
+                    base_color_factor,
                     normal_texture:     normal_tex,
                     emissive_texture:   emissive_tex,
                     occlusion_texture:  occlusion_tex,
@@ -360,6 +380,7 @@ fn build_glb_content(
                 json_builder::GltfMaterial {
                     name:               format!("madd_{}", mat_idx),
                     base_color_texture: diff,
+                    base_color_factor:  [1.0, 1.0, 1.0, 1.0],
                     normal_texture:     norm,
                     emissive_texture:   emis,
                     occlusion_texture:  ao,
@@ -1022,6 +1043,7 @@ mod attr_tests {
         GltfMaterial {
             name:               "m".into(),
             base_color_texture: base,
+            base_color_factor:  [1.0, 1.0, 1.0, 1.0],
             normal_texture:     normal,
             emissive_texture:   None,
             occlusion_texture:  None,
