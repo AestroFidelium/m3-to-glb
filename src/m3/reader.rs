@@ -17,8 +17,8 @@
 //! Instead we look up tags directly by their LE name.
 
 use super::structures::{
-    Bat, Bone, Cmp, Cms, Div, Iref, Layr, Matm, MdIndexEntry, Quat, Reference, Regn, Schr, Sd3v,
-    Sd4q, Seqs, SeqsV1, Stc, Stg, Vec3,
+    Bat, Bone, Cmp, Cms, Div, Iref, Layr, Lite, Matm, MdIndexEntry, Par, Proj, Quat, Reference,
+    Regn, Schr, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec3,
 };
 use super::{M3Version, detect_version};
 use anyhow::{Result, ensure};
@@ -32,6 +32,43 @@ const TAG_VERTICES: &[u8; 4] = b"__8U"; // "U8__" — vertices (count = bytes)
 const TAG_INDICES: &[u8; 4] = b"_61U"; // "U16_" — u16 indices
 
 const TAG_BATCHES: &[u8; 4] = b"_TAB"; // "BAT_"
+
+// Effect tags. Located by name rather than through the MODL references that
+// point at them: those field offsets move between MODL versions, while exactly
+// one tag of each kind exists per file.
+const TAG_PAR: &[u8; 4] = b"_RAP"; // "PAR_" — particle systems
+const TAG_LITE: &[u8; 4] = b"ETIL"; // "LITE" — lights
+const TAG_PROJ: &[u8; 4] = b"JORP"; // "PROJ" — projections (decals)
+
+/// Widen a PAR_ v22/v23 record into the v24 [`Par`] layout.
+///
+/// The three fields v24 added over v22 sit in exactly two places, so the record
+/// is spliced rather than re-parsed: `world_forces_mass_mult` was inserted in
+/// the middle (v24), and two unknowns were appended at the end (v23). Each gets
+/// the default `structures.xml` records for it, so an older emitter reads as if
+/// it had been authored with those fields left alone.
+fn upgrade_par(raw: &[u8], version: u32) -> Par {
+    let full = std::mem::size_of::<Par>();
+    // Offset of the field v24 inserted in the middle of the struct.
+    let splice = std::mem::offset_of!(Par, world_forces_mass_mult);
+
+    let mut buf = vec![0u8; full];
+    if version >= 24 {
+        buf.copy_from_slice(&raw[..full]);
+    } else {
+        buf[..splice].copy_from_slice(&raw[..splice]);
+        buf[splice..splice + 4].copy_from_slice(&1.0_f32.to_le_bytes());
+        let tail = &raw[splice..];
+        buf[splice + 4..splice + 4 + tail.len()].copy_from_slice(tail);
+        if version < 23 {
+            // unknown9a7afdf2 defaults to 0 (already zeroed); unknown87d57a7a
+            // defaults to -1.
+            let at = full - 4;
+            buf[at..].copy_from_slice(&(-1_i32).to_le_bytes());
+        }
+    }
+    bytemuck::pod_read_unaligned(&buf)
+}
 
 /// Vertex stride (bytes) implied by a MODL `vertex_flags` bitset.
 ///
@@ -260,6 +297,85 @@ impl<'data> M3File<'data> {
         }
     }
 
+    /// PAR_ particle systems, or an empty vec when the file has none.
+    ///
+    /// [`Par`] describes **version 24** (Heroes of the Storm, SC2 Legacy of the
+    /// Void). Versions 22 and 23 — War3 Reforged and older SC2 — differ from it
+    /// by three fields and are widened to the v24 layout on read (see
+    /// [`upgrade_par`]); anything older grew in too many places to splice and is
+    /// skipped with a warning rather than misread.
+    pub fn particle_systems(&self) -> Result<Vec<Par>> {
+        let Some(idx) = self.find_tag(TAG_PAR) else {
+            return Ok(Vec::new());
+        };
+        let entry = &self.tags[idx];
+        let full = std::mem::size_of::<Par>();
+        let stride = match entry.version {
+            24 => full,
+            23 => full - 8,  // no unknown9a7afdf2 / unknown87d57a7a
+            22 => full - 12, // …and no world_forces_mass_mult
+            v => {
+                tracing::warn!(
+                    "PAR_ version {} is not supported (22, 23 and 24 are) — {} effect(s) skipped",
+                    v,
+                    entry.repetitions,
+                );
+                return Ok(Vec::new());
+            }
+        };
+
+        let start = entry.offset as usize;
+        let count = entry.repetitions as usize;
+        let end = start + count * stride;
+        ensure!(
+            end <= self.data.len(),
+            "PAR_ out of bounds (end={} > file={})",
+            end,
+            self.data.len()
+        );
+
+        Ok(self.data[start..end]
+            .chunks_exact(stride)
+            .map(|raw| upgrade_par(raw, entry.version))
+            .collect())
+    }
+
+    /// LITE lights (version 7 only), or an empty vec.
+    pub fn lights(&self) -> Result<Vec<Lite>> {
+        self.read_versioned_tag::<Lite>(TAG_LITE, 7, "LITE")
+    }
+
+    /// PROJ projections — ground decals (version 5 only), or an empty vec.
+    pub fn projections(&self) -> Result<Vec<Proj>> {
+        self.read_versioned_tag::<Proj>(TAG_PROJ, 5, "PROJ")
+    }
+
+    /// Read a whole tag as `T`, but only when its version is the one `T`
+    /// describes. A version mismatch is a skip (empty vec + warning), never an
+    /// error: a model whose effects we cannot read still converts its geometry.
+    fn read_versioned_tag<T: bytemuck::Pod>(
+        &self,
+        tag_le: &[u8; 4],
+        want_version: u32,
+        name: &str,
+    ) -> Result<Vec<T>> {
+        let Some(idx) = self.find_tag(tag_le) else {
+            return Ok(Vec::new());
+        };
+        let entry = &self.tags[idx];
+        if entry.version != want_version {
+            tracing::warn!(
+                "{} version {} is not supported (only v{}) — {} effect(s) skipped",
+                name,
+                entry.version,
+                want_version,
+                entry.repetitions,
+            );
+            return Ok(Vec::new());
+        }
+        self.read_tag_slice::<T>(idx)
+    }
+
     /// IREF entries (per-bone inverse rest matrices). Found by tag b"FERI"
     /// rather than via MODL.bone_rests, since the bone_rests offset moves
     /// across MODL versions but only one IREF tag exists per file.
@@ -268,6 +384,16 @@ impl<'data> M3File<'data> {
             Some(idx) => self.read_tag_slice::<Iref>(idx),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// Whether the model carries geometry at all.
+    ///
+    /// Most ability effects do not: the M3 is a skeleton plus particle emitters,
+    /// with neither a vertex buffer nor a division. That is a legitimate model,
+    /// not a truncated one, so callers check this instead of treating the
+    /// missing tags as a parse failure.
+    pub fn has_geometry(&self) -> bool {
+        self.find_tag(TAG_VERTICES).is_some() && self.find_tag(TAG_DIV).is_some()
     }
 
     /// Compute the vertex stride from `vertex_flags` per structures.xml.
@@ -919,6 +1045,42 @@ impl<'data> M3File<'data> {
     }
 
     /// Read the SD4Q block array referenced by `STC.sd4q`.
+    /// SDS6 — `i16` keyframe blocks (`STC.sds6`).
+    pub fn read_sds6(&self, r: &Reference) -> Result<Vec<Sds6>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<Sds6>(r)
+    }
+
+    /// SDU6 — `u16` keyframe blocks (`STC.sdu6`).
+    pub fn read_sdu6(&self, r: &Reference) -> Result<Vec<Sdu6>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<Sdu6>(r)
+    }
+
+    /// `I16_` array via Reference — the key values of an SDS6 block.
+    pub fn read_ref_i16(&self, r: &Reference) -> Result<Vec<i16>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<i16>(r)
+    }
+
+    /// `U16_` array via Reference — the key values of an SDU6 block.
+    pub fn read_ref_u16(&self, r: &Reference) -> Result<Vec<u16>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<u16>(r)
+    }
+
+    /// SDR3 — float keyframe blocks (`STC.sdr3`).
+    pub fn read_sdr3(&self, r: &Reference) -> Result<Vec<Sdr3>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<Sdr3>(r)
+    }
+
+    /// REAL array via Reference — the key values of an SDR3 block.
+    pub fn read_ref_f32(&self, r: &Reference) -> Result<Vec<f32>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<f32>(r)
+    }
+
     pub fn read_sd4q(&self, r: &Reference) -> Result<Vec<Sd4q>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd4q>(r)

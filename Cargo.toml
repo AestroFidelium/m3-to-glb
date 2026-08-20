@@ -49,6 +49,10 @@ clap_complete = "4"
 # ──────────────────────────────────────────────────────────────────────────────
 [dev-dependencies]
 bolero = { version = "0.13", features = ["arbitrary"] }
+# Effect parameters are written as hand-rolled JSON straight into the GLB's JSON
+# chunk, where one malformed byte costs the whole file — so the tests parse the
+# output with a real parser rather than eyeballing the string.
+serde_json = "1"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

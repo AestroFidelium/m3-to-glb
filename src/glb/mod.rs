@@ -27,6 +27,7 @@ mod json_builder;
 mod ktx2;
 
 use crate::assets::TextureCache;
+use crate::fx;
 use crate::m3::reader::M3File;
 use crate::processor::MeshDataSoA;
 use crate::processor::anim::{self, Path as AnimPath, SamplerData};
@@ -49,6 +50,10 @@ pub struct PackOptions {
     /// If non-zero, downscale every embedded texture so its largest
     /// dimension is at most this many pixels (aspect-preserving Lanczos3).
     pub max_tex_size: u32,
+    /// Export particle systems, lights and projections as effect nodes carrying
+    /// their parameters in glTF `extras` (see [`crate::fx`]). On by default;
+    /// `--no-fx` turns it off.
+    pub fx: bool,
 }
 
 // ─── Magic & type constants ──────────────────────────────────────────────────
@@ -74,9 +79,10 @@ pub fn pack_and_write(
     // Align BIN to 4 bytes (padding = zero bytes).
     let bin_padded  = align4_zeros(&bin_bytes);
 
+    let bin_chunk_size = if bin_padded.is_empty() { 0 } else { 8 + bin_padded.len() as u32 };
     let total_size: u32 = 12 // GLB header
         + 8 + json_padded.len() as u32  // JSON chunk header + data
-        + 8 + bin_padded.len()  as u32; // BIN chunk header + data
+        + bin_chunk_size;               // BIN chunk header + data, when present
 
     debug!(
         "GLB: JSON {}B, BIN {}B, total {}B",
@@ -97,9 +103,13 @@ pub fn pack_and_write(
     file.write_all(&json_padded)?;
 
     // ── BIN Chunk ─────────────────────────────────────────────────────────────
-    write_u32(&mut file, bin_padded.len() as u32)?;
-    write_u32(&mut file, CHUNK_TYPE_BIN)?;
-    file.write_all(&bin_padded)?;
+    // Omitted entirely when there is nothing to put in it — an effect-only model
+    // can consist of nodes alone, and the JSON then declares no buffer either.
+    if !bin_padded.is_empty() {
+        write_u32(&mut file, bin_padded.len() as u32)?;
+        write_u32(&mut file, CHUNK_TYPE_BIN)?;
+        file.write_all(&bin_padded)?;
+    }
 
     Ok(())
 }
@@ -170,6 +180,23 @@ fn build_glb_content(
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut bin_buf: Vec<u8> = Vec::new();
 
+    // ── Effects (PAR_ / LITE / PROJ) ─────────────────────────────────────────
+    // Collected before anything else because they change what the rest of the
+    // file needs: most ability effects have no geometry at all, and bones plus
+    // their animations are otherwise emitted only for skinned meshes — leaving
+    // the emitters pinned to the origin instead of riding the animated bone.
+    let fx_items = if options.fx { fx::collect(m3) } else { Vec::new() };
+    // Animated emitter tracks. Resolved only when there is an effect to attach
+    // them to — the lookup walks every sequence in the file.
+    let fx_curves = if fx_items.is_empty() {
+        fx::curves::FxCurves::default()
+    } else {
+        fx::curves::FxCurves::build(m3)
+    };
+    if !fx_items.is_empty() {
+        debug!("effects: {} node(s)", fx_items.len());
+    }
+
     let mut accessors:    Vec<json_builder::Accessor>    = Vec::new();
     let mut buffer_views: Vec<json_builder::BufferView>  = Vec::new();
     let mut meshes_json:  Vec<json_builder::GltfMesh>    = Vec::new();
@@ -198,14 +225,31 @@ fn build_glb_content(
 
     let want_ktx2    = options.ktx2;
     let max_tex_size = options.max_tex_size;
+    // Path+role → image index. Effect materials routinely share a texture with
+    // each other and with mesh materials (one frost atlas across six emitters);
+    // without this every reference would embed — and, under `--ktx2`, re-encode
+    // — its own copy.
+    let mut image_cache: ahash::AHashMap<(String, ktx2::TextureRole), Option<usize>> =
+        ahash::AHashMap::new();
     let load_image = |path: &str,
                           role: ktx2::TextureRole,
                           buffer_views: &mut Vec<json_builder::BufferView>,
                           bin_buf: &mut Vec<u8>,
-                          images_json: &mut Vec<json_builder::GltfImage>|
+                          images_json: &mut Vec<json_builder::GltfImage>,
+                          cache: &mut ahash::AHashMap<(String, ktx2::TextureRole), Option<usize>>|
      -> Option<usize> {
         if path.is_empty() || textures.is_empty() { return None; }
-        let (tex_path, mime) = textures.find_with_mime(path)?;
+        let cache_key = (path.to_ascii_lowercase(), role);
+        if let Some(hit) = cache.get(&cache_key) {
+            return *hit;
+        }
+        let (tex_path, mime) = match textures.find_with_mime(path) {
+            Some(v) => v,
+            None => {
+                cache.insert(cache_key, None);
+                return None;
+            }
+        };
 
         // Try KTX2 transcode first when requested. On failure (toktx missing,
         // unsupported source format, etc.) fall back to the original bytes,
@@ -231,6 +275,7 @@ fn build_glb_content(
                         Ok(t) => t,
                         Err(e2) => {
                             debug!("failed to read texture {:?}: {}", tex_path, e2);
+                            cache.insert(cache_key, None);
                             return None;
                         }
                     }
@@ -244,6 +289,7 @@ fn build_glb_content(
                 }
                 Err(e) => {
                     debug!("failed to read texture {:?}: {}", tex_path, e);
+                    cache.insert(cache_key, None);
                     return None;
                 }
             }
@@ -255,6 +301,7 @@ fn build_glb_content(
             buffer_view: bv_idx,
             mime_type:   final_mime,
         });
+        cache.insert(cache_key, Some(img_idx));
         Some(img_idx)
     };
 
@@ -270,22 +317,22 @@ fn build_glb_content(
                 let base_color_tex = load_image(
                     &diff_path,
                     ktx2::TextureRole::Color,
-                    &mut buffer_views, &mut bin_buf, &mut images_json,
+                    &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
                 );
                 let normal_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "norm").unwrap_or_default(),
                     ktx2::TextureRole::NormalMap,
-                    &mut buffer_views, &mut bin_buf, &mut images_json,
+                    &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
                 );
                 let emissive_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "emis1").unwrap_or_default(),
                     ktx2::TextureRole::Color,
-                    &mut buffer_views, &mut bin_buf, &mut images_json,
+                    &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
                 );
                 let occlusion_tex = load_image(
                     &m3.texture_path_for_layer(mat_idx, "ao").unwrap_or_default(),
                     ktx2::TextureRole::Data,
-                    &mut buffer_views, &mut bin_buf, &mut images_json,
+                    &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
                 );
 
                 let blend_mode      = m3.mat_blend_mode(mat_idx);
@@ -355,19 +402,23 @@ fn build_glb_content(
                     match slot_from_filename(p) {
                         Some(MaddSlot::Diff) if diff.is_none() => {
                             diff = load_image(p, ktx2::TextureRole::Color,
-                                &mut buffer_views, &mut bin_buf, &mut images_json);
+                                &mut buffer_views, &mut bin_buf, &mut images_json,
+                                &mut image_cache);
                         }
                         Some(MaddSlot::Norm) if norm.is_none() => {
                             norm = load_image(p, ktx2::TextureRole::NormalMap,
-                                &mut buffer_views, &mut bin_buf, &mut images_json);
+                                &mut buffer_views, &mut bin_buf, &mut images_json,
+                                &mut image_cache);
                         }
                         Some(MaddSlot::Emis) if emis.is_none() => {
                             emis = load_image(p, ktx2::TextureRole::Color,
-                                &mut buffer_views, &mut bin_buf, &mut images_json);
+                                &mut buffer_views, &mut bin_buf, &mut images_json,
+                                &mut image_cache);
                         }
                         Some(MaddSlot::Ao) if ao.is_none() => {
                             ao = load_image(p, ktx2::TextureRole::Data,
-                                &mut buffer_views, &mut bin_buf, &mut images_json);
+                                &mut buffer_views, &mut bin_buf, &mut images_json,
+                                &mut image_cache);
                         }
                         _ => {} // _spec / unknown / slot already filled
                     }
@@ -526,11 +577,79 @@ fn build_glb_content(
         });
     }
 
+    // ── Effect materials ─────────────────────────────────────────────────────
+    // An emitter's material never becomes a glTF material: nothing in the scene
+    // draws with it, and an unreferenced material is exactly what the material
+    // compaction above exists to avoid. Only its texture has to travel in the
+    // file — the runtime that spawns the emitter samples it — so the diffuse
+    // layer is embedded and reported back through the node's `extras`.
+    let mut fx_materials: ahash::AHashMap<usize, fx::MaterialResolve> = ahash::AHashMap::new();
+    // Effects reference composites (`CMP_`) as readily as plain materials — a
+    // projection's material is routinely one — so each reference is resolved
+    // down to the renderable section first, the same way region materials are.
+    let fx_matref_resolved = if fx_items.is_empty() {
+        Vec::new()
+    } else {
+        m3.resolved_material_refs()
+    };
+    for requested in fx_items.iter().filter_map(|it| it.matm_index) {
+        if fx_materials.contains_key(&requested) {
+            continue;
+        }
+        let matm_idx = fx_matref_resolved
+            .get(requested)
+            .copied()
+            .flatten()
+            .unwrap_or(requested);
+        let Some(matm) = matm_list.get(matm_idx) else {
+            debug!("effect references matm[{}] of {} — no material", matm_idx, matm_list.len());
+            continue;
+        };
+        let mat_idx = matm.material_index as usize;
+        let mut resolve = fx::MaterialResolve::default();
+        match matm.mat_type {
+            1 if mat_idx < mat_count => {
+                let diff = m3.texture_path_for_layer(mat_idx, "diff").unwrap_or_default();
+                resolve.texture = load_image(
+                    &diff, ktx2::TextureRole::Color,
+                    &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
+                );
+                // A textureless effect material carries its colour in the layer
+                // itself — the same flat-colour case the mesh path handles.
+                if resolve.texture.is_none() {
+                    resolve.color = m3.layer_color(mat_idx, "diff")
+                        .or_else(|| m3.layer_color(mat_idx, "emis1"));
+                }
+                resolve.blend = blend_name(m3.mat_blend_mode(mat_idx));
+            }
+            12 if mat_idx < madd_count => {
+                for path in m3.madd_texture_paths(mat_idx).unwrap_or_default() {
+                    if matches!(slot_from_filename(&path), Some(MaddSlot::Diff)) {
+                        resolve.texture = load_image(
+                            &path, ktx2::TextureRole::Color,
+                            &mut buffer_views, &mut bin_buf, &mut images_json, &mut image_cache,
+                        );
+                        break;
+                    }
+                }
+                resolve.blend = "blend";
+            }
+            _ => {
+                debug!("effect matm[{}] mat_type={} — unsupported", matm_idx, matm.mat_type);
+            }
+        }
+        fx_materials.insert(requested, resolve);
+    }
+
     // ── Skeleton ─────────────────────────────────────────────────────────────
     // One skeleton per skinned mesh (shared if bones are common). In M3 the
     // bones are shared across the whole model, so a single skin is enough.
     let any_skinned = meshes.iter().any(|m| m.has_skin);
-    let bones = if any_skinned { m3.bones().unwrap_or_default() } else { Vec::new() };
+    // Effects need the skeleton even with no skinned geometry to hang it on:
+    // the emitter node is a child of its bone, and that bone's animation is what
+    // moves the effect through the world.
+    let want_bones = any_skinned || !fx_items.is_empty();
+    let bones = if want_bones { m3.bones().unwrap_or_default() } else { Vec::new() };
     let bone_rests = if any_skinned { m3.bone_rests().unwrap_or_default() } else { Vec::new() };
 
     // Scene layout (no separate rotation root — the skinned mesh node must
@@ -585,6 +704,7 @@ fn build_glb_content(
             mesh:        None,
             skin:        None,
             children:    Vec::new(),
+            extras:      None,
         });
     }
     // Build parent → children. parent == -1 → root bone (becomes a scene root).
@@ -599,6 +719,34 @@ fn build_glb_content(
                 nodes[parent_node].children.push(child_node);
             }
         }
+    }
+
+    // ── Effect nodes ─────────────────────────────────────────────────────────
+    // One empty node per effect, parented to the bone it rides, carrying its
+    // parameters in `extras`. Nothing else in the glTF references these nodes:
+    // they exist so that an engine walking the spawned scene finds the emitter
+    // already positioned, already parented, and already animated.
+    for item in &fx_items {
+        if item.bone >= bones.len() {
+            continue;
+        }
+        let mat = item
+            .matm_index
+            .and_then(|i| fx_materials.get(&i))
+            .copied()
+            .unwrap_or_default();
+        let node_idx = nodes.len();
+        nodes.push(json_builder::GltfNode {
+            name:        Some(item.name.clone()),
+            translation: item.translation(),
+            rotation:    None,
+            scale:       None,
+            mesh:        None,
+            skin:        None,
+            children:    Vec::new(),
+            extras:      Some(item.extras_json(&mat, &fx_curves)),
+        });
+        nodes[bone_node_base + item.bone].children.push(node_idx);
     }
 
     // Inverse Bind Matrices.
@@ -651,6 +799,7 @@ fn build_glb_content(
             mesh:        Some(0),
             skin:        skin_idx,
             children:    Vec::new(),
+            extras:      None,
         });
         Some(idx)
     } else {
@@ -675,6 +824,7 @@ fn build_glb_content(
             mesh:        None,
             skin:        None,
             children:    bone_root_nodes,
+            extras:      None,
         });
         scene_roots.push(armature_idx);
     } else {
@@ -691,7 +841,7 @@ fn build_glb_content(
     // bone_node_base = 0: bones occupy the first [0..bones.len()] node indices.
     // Animation sources: the main `.m3` (in case it carries inline SEQS) +
     // every external `.m3a` passed via --anims. If there are no bones, skip.
-    let m3_anims = if any_skinned && !bones.is_empty() {
+    let m3_anims = if want_bones && !bones.is_empty() {
         let mut sources: Vec<&M3File<'_>> = Vec::with_capacity(1 + anim_sources.len());
         sources.push(m3);
         sources.extend(anim_sources.iter().copied());
@@ -779,6 +929,18 @@ fn build_glb_content(
 
     let _ = mesh_skin_idx; // currently unused, retained for future per-mesh skin mapping
     Ok((json.into_bytes(), bin_buf))
+}
+
+/// M3 `MAT_.blend_mode` → the blend name written into an effect's `extras`.
+/// Values are m3studio's `mat_blend`: 0 opaque, 1 alpha blend, 2 add,
+/// 3 alpha add, 4 mod, 5 mod 2x.
+fn blend_name(blend_mode: u32) -> &'static str {
+    match blend_mode {
+        0 => "opaque",
+        2 | 3 => "add",
+        4 | 5 => "multiply",
+        _ => "blend",
+    }
 }
 
 fn push_buffer_view(

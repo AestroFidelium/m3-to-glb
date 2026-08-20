@@ -73,6 +73,14 @@ pub struct Cli {
     #[arg(long, value_name = "PX", default_value_t = 0)]
     pub max_tex_size: u32,
 
+    /// Do not export effects. By default every particle system (`PAR_`),
+    /// light (`LITE`) and projection (`PROJ`) becomes an empty glTF node,
+    /// parented to the bone it rides on, carrying its parameters in the node's
+    /// `extras` under the key `m3fx` — glTF has no particle systems of its own,
+    /// so this is how the effect travels. Pass this to emit geometry only.
+    #[arg(long = "no-fx")]
+    pub no_fx: bool,
+
     /// Log level (off, error, warn, info, debug, trace). Default: warn.
     #[arg(short, long, default_value = "warn", value_name = "LEVEL")]
     pub verbose: String,

@@ -13,6 +13,14 @@ use tracing::debug;
 
 /// Convert every M3 mesh into SoA form, in parallel via rayon.
 pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
+    // A model with no geometry at all is ordinary, not broken: most ability
+    // effects are a skeleton plus particle emitters, carrying neither a vertex
+    // buffer nor a division. Converting one yields no meshes — the effects still
+    // reach the GLB (see `crate::fx`).
+    if !m3.has_geometry() {
+        debug!("no vertex buffer / division — effect-only model");
+        return Ok(Vec::new());
+    }
     let divisions = m3.divisions()?;
     if divisions.is_empty() { return Ok(Vec::new()); }
 

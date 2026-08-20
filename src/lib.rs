@@ -7,6 +7,7 @@
 
 pub mod assets;
 pub mod cli;
+pub mod fx;
 pub mod glb;
 pub mod m3;
 pub mod processor;

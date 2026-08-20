@@ -32,7 +32,7 @@ use std::process::Command;
 
 /// Role a texture plays in the material — drives the OETF tag and (for
 /// normal maps) the channel unswizzle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextureRole {
     /// sRGB color data (baseColor, emissive). UASTC + Zstd, OETF tagged
     /// sRGB so the GPU sampler gamma-decodes at sample time.

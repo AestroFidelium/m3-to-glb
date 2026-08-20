@@ -94,6 +94,7 @@ fn main() -> Result<()> {
         ktx2:         cli.ktx2,
         bevy_compat:  cli.bevy_compat,
         max_tex_size: cli.max_tex_size,
+        fx:           !cli.no_fx,
     };
 
     match run_conversion(

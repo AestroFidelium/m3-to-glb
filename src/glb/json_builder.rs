@@ -72,6 +72,10 @@ pub struct GltfNode {
     pub mesh:        Option<usize>,
     pub skin:        Option<usize>,
     pub children:    Vec<usize>,
+    /// Raw JSON object written verbatim as the node's `extras`. Effects ride
+    /// here (see `crate::fx`); glTF treats `extras` as opaque application data,
+    /// and Bevy surfaces it as a `GltfExtras` component on the node's entity.
+    pub extras:      Option<String>,
 }
 
 pub struct GltfSkin {
@@ -328,6 +332,10 @@ pub fn build_json(
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
+    // Every array below is omitted when empty: glTF forbids a zero-length
+    // `accessors` / `bufferViews`, and an effect-only model reaches here with
+    // nothing but nodes.
+    if !accessors.is_empty() {
     j.push_str(r#""accessors":["#);
     for (i, acc) in accessors.iter().enumerate() {
         if i > 0 { j.push(','); }
@@ -362,23 +370,34 @@ pub fn build_json(
         j.push('}');
     }
     j.push_str("],");
+    }
 
     // ── bufferViews ───────────────────────────────────────────────────────────
-    j.push_str(r#""bufferViews":["#);
-    for (i, bv) in buffer_views.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        j.push('{');
-        write!(j, r#""buffer":0,"byteOffset":{},"byteLength":{}"#, bv.offset, bv.length).unwrap();
-        if let Some(target) = bv.target {
-            write!(j, r#","target":{}"#, target).unwrap();
+    if !buffer_views.is_empty() {
+        j.push_str(r#""bufferViews":["#);
+        for (i, bv) in buffer_views.iter().enumerate() {
+            if i > 0 { j.push(','); }
+            j.push('{');
+            write!(j, r#""buffer":0,"byteOffset":{},"byteLength":{}"#, bv.offset, bv.length).unwrap();
+            if let Some(target) = bv.target {
+                write!(j, r#","target":{}"#, target).unwrap();
+            }
+            j.push('}');
         }
-        j.push('}');
+        j.push_str("],");
     }
-    j.push_str("],");
 
     // ── buffers ───────────────────────────────────────────────────────────────
-    write!(j, r#""buffers":[{{"byteLength":{}}}]"#, bin_length).unwrap();
+    // A buffer must be at least one byte long, so a model whose BIN chunk is
+    // empty declares no buffer at all rather than a zero-length one.
+    if bin_length > 0 {
+        write!(j, r#""buffers":[{{"byteLength":{}}}],"#, bin_length).unwrap();
+    }
 
+    // Every section above ends with its own comma; drop the last one.
+    if j.ends_with(',') {
+        j.pop();
+    }
     j.push('}');
     j
 }
@@ -414,6 +433,11 @@ fn write_node(j: &mut String, n: &GltfNode) {
     if let Some(s) = n.skin {
         sep!();
         write!(j, r#""skin":{}"#, s).unwrap();
+    }
+    if let Some(ref extras) = n.extras {
+        sep!();
+        j.push_str(r#""extras":"#);
+        j.push_str(extras);
     }
     if !n.children.is_empty() {
         sep!();
