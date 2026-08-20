@@ -16,6 +16,10 @@ Features:
   joints / weights
 - Animations — translation / rotation / scale tracks per bone, parsed
   from `SEQS` / `STG` / `STC` blocks; supports companion `.m3a` files
+- Effects — particle systems (`PAR_`), lights (`LITE`) and projections
+  (`PROJ`) exported as empty nodes parented to the bone they ride on,
+  with their parameters in the node's glTF `extras` (see
+  [docs/fx-extras.md](docs/fx-extras.md))
 - Z-up → Y-up bake on rest pose, animations and AABB
 - Zero-copy `mmap` parsing, SIMD geometry transforms (AVX2 / SSE4.1 /
   scalar), rayon-parallel mesh conversion
@@ -83,6 +87,7 @@ m3-to-glb INPUT [-o OUT.glb] [-t TEXTURE_DIR] [-a ANIM.m3a ...] [-q | -v LEVEL]
 | `--ktx2`               | Transcode every texture to KTX2/UASTC + Zstd (with mipmaps) and emit the `KHR_texture_basisu` glTF extension. OETF is tagged per material slot: `sRGB` for baseColor / emissive, `linear` for normal / occlusion / data channels. Massive VRAM savings in engines that transcode at load time (Bevy, three.js, Babylon). Requires [`toktx`](https://github.com/KhronosGroup/KTX-Software) on PATH — already bundled when running through Nix. |
 | `--bevy-compat`        | **Non-spec workaround for Bevy 0.17.** Requires `--ktx2`. Drops the `KHR_texture_basisu` extension declaration and references KTX2 images via the standard `texture.source` field with `mimeType: "image/ktx2"`. Bevy's `bevy_image` (with `ktx2` + `basis-universal` features) decodes by MIME type, but only when the extension is absent. The output is **not valid glTF** — Blender, three.js and the Khronos validator will reject it. Do not use for anything other than a Bevy 0.17.x target. |
 | `--max-tex-size <PX>`  | Cap each embedded texture so its largest dimension does not exceed `PX` pixels (aspect-preserving Lanczos3 resize). Applied before encoding in both the `--ktx2` and the raw-embed paths. Default `0` = no resize. Useful when the model sits far from camera and a 2K/4K source texture would just waste VRAM. In the raw-embed path, resized textures are re-encoded as PNG; without `--max-tex-size` source bytes are still passed through verbatim. |
+| `--no-fx`              | Do not export effects. By default every particle system (`PAR_`), light (`LITE`) and projection (`PROJ`) becomes an empty node parented to the bone it rides on, carrying its parameters in that node's `extras` under the key `m3fx` — glTF has no particle systems of its own, so this is how the effect travels. See [docs/fx-extras.md](docs/fx-extras.md). |
 | `-v`, `--verbose`      | Log level: `off`, `error`, `warn` (default), `info`, `debug`, `trace`. Same effect as `RUST_LOG=<level>`. |
 
 By default the converter prints a single one-line summary per file
@@ -114,6 +119,15 @@ cargo run --release -- Storm_Hero_Tracer_Base.m3 \
     -o tracer.glb \
     -t /path/to/textures \
     -a Storm_Hero_Tracer_RequiredAnims.m3a
+```
+
+Ability effect — no geometry at all, just emitters riding animated
+bones:
+
+```bash
+cargo run --release -- Storm_FX_Jaina_Base_RingofFrost.m3 \
+    -t /path/to/textures
+# → 4 particle systems, 1 light and 1 projection as `extras`-carrying nodes
 ```
 
 Multiple animation files at once:
