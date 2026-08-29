@@ -50,7 +50,14 @@
           pname = "m3-to-glb";
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
-          cargoLock.lockFile = ./Cargo.lock;
+          # NOT `cargoLock.lockFile`: that path vendors through `importCargoLock`,
+          # which downloads every crate from `crates.io/api/v1/crates/...` with
+          # nixpkgs' fetchurl User-Agent (`curl/X Nixpkgs/Y`) — and crates.io now
+          # answers 403 to any `curl/*` UA, so every crate fails to fetch.
+          # `cargoHash` goes through `fetchCargoVendor`, which pulls from the
+          # `static.crates.io` CDN instead. Re-run with `cargoHash = "";` and copy
+          # the reported hash whenever Cargo.lock changes.
+          cargoHash = "sha256-ZAp8ZHj1aYZG+ziYFtWcdzKBeOv1Z8mlpZ/xcXVhnQM=";
 
           # `.cargo/config.toml` pins clang + mold as the linker.
           # `installShellFiles` ships the zsh completions emitted by build.rs.
