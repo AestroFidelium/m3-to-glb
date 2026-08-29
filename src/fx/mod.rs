@@ -632,7 +632,7 @@ fn nz(v: f32, fallback: f32) -> f32 {
 
 /// JSON number, never `NaN` / `Infinity` — neither is valid JSON, and either
 /// one inside the JSON chunk makes the whole GLB unreadable.
-fn num(v: f32) -> String {
+pub(crate) fn num(v: f32) -> String {
     if !v.is_finite() {
         return "0".to_owned();
     }
@@ -644,16 +644,16 @@ fn num(v: f32) -> String {
 
 /// A minimal JSON object writer — the same string-concatenation approach the
 /// glTF manifest builder uses, so effects add no serialisation dependency.
-struct Obj {
+pub(crate) struct Obj {
     s:     String,
     first: bool,
 }
 
 impl Obj {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { s: String::from("{"), first: true }
     }
-    fn key(&mut self, k: &str) {
+    pub(crate) fn key(&mut self, k: &str) {
         if !self.first {
             self.s.push(',');
         }
@@ -662,41 +662,41 @@ impl Obj {
         self.s.push_str(k);
         self.s.push_str("\":");
     }
-    fn raw(&mut self, k: &str, v: &str) {
+    pub(crate) fn raw(&mut self, k: &str, v: &str) {
         self.key(k);
         self.s.push_str(v);
     }
-    fn num(&mut self, k: &str, v: f32) {
+    pub(crate) fn num(&mut self, k: &str, v: f32) {
         self.key(k);
         self.s.push_str(&num(v));
     }
-    fn int(&mut self, k: &str, v: u64) {
+    pub(crate) fn int(&mut self, k: &str, v: u64) {
         self.key(k);
         self.s.push_str(&v.to_string());
     }
-    fn bool(&mut self, k: &str, v: bool) {
+    pub(crate) fn bool(&mut self, k: &str, v: bool) {
         self.key(k);
         self.s.push_str(if v { "true" } else { "false" });
     }
-    fn string(&mut self, k: &str, v: &str) {
+    pub(crate) fn string(&mut self, k: &str, v: &str) {
         self.key(k);
         // Effect strings are engine identifiers and sanitized bone names, but
         // escape defensively: an unescaped quote would corrupt the whole GLB.
         self.s.push_str(&format!("{v:?}"));
     }
-    fn vec2(&mut self, k: &str, v: [f32; 2]) {
+    pub(crate) fn vec2(&mut self, k: &str, v: [f32; 2]) {
         self.raw(k, &format!("[{},{}]", num(v[0]), num(v[1])));
     }
-    fn vec2i(&mut self, k: &str, v: [u8; 2]) {
+    pub(crate) fn vec2i(&mut self, k: &str, v: [u8; 2]) {
         self.raw(k, &format!("[{},{}]", v[0], v[1]));
     }
-    fn vec3(&mut self, k: &str, v: [f32; 3]) {
+    pub(crate) fn vec3(&mut self, k: &str, v: [f32; 3]) {
         self.raw(k, &format!("[{},{},{}]", num(v[0]), num(v[1]), num(v[2])));
     }
-    fn vec4(&mut self, k: &str, v: [f32; 4]) {
+    pub(crate) fn vec4(&mut self, k: &str, v: [f32; 4]) {
         self.raw(k, &format!("[{},{},{},{}]", num(v[0]), num(v[1]), num(v[2]), num(v[3])));
     }
-    fn finish(mut self) -> String {
+    pub(crate) fn finish(mut self) -> String {
         self.s.push('}');
         self.s
     }

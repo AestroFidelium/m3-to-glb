@@ -27,6 +27,7 @@ mod json_builder;
 mod ktx2;
 
 use crate::assets::TextureCache;
+use crate::attach;
 use crate::fx;
 use crate::m3::reader::M3File;
 use crate::processor::MeshDataSoA;
@@ -648,7 +649,10 @@ fn build_glb_content(
     // Effects need the skeleton even with no skinned geometry to hang it on:
     // the emitter node is a child of its bone, and that bone's animation is what
     // moves the effect through the world.
-    let want_bones = any_skinned || !fx_items.is_empty();
+    // Attachment points ride existing bone nodes, so they need the skeleton for
+    // the same reason effects do: an unskinned model still has to export its
+    // bones for `Ref_Head` to exist as a node at all.
+    let want_bones = any_skinned || !fx_items.is_empty() || m3.has_attachment_points();
     let bones = if want_bones { m3.bones().unwrap_or_default() } else { Vec::new() };
     let bone_rests = if any_skinned { m3.bone_rests().unwrap_or_default() } else { Vec::new() };
 
@@ -672,6 +676,23 @@ fn build_glb_content(
         0.0_f32,
         std::f32::consts::FRAC_1_SQRT_2,
     ];
+
+    // Attachment points (`Ref_Head`, `Ref_Weapon Right`, …) — see
+    // `crate::attach`. They are not nodes of their own: each one names a bone
+    // that is already being emitted, so the name is written into that bone
+    // node's `extras`.
+    let attachments = attach::collect(m3, bones.len());
+    let mut attach_extras: ahash::AHashMap<usize, String> = ahash::AHashMap::new();
+    for a in &attachments {
+        // Two attachments on one bone would fight over the same `extras`; the
+        // first wins, which matches the order the game's own table lists them.
+        if attach_extras.insert(a.bone, a.extras_json()).is_some() {
+            warn!("bone {} carries more than one attachment point — kept the first", a.bone);
+        }
+    }
+    if !attachments.is_empty() {
+        debug!("attachment points: {}", attachments.len());
+    }
 
     let bone_node_base = 0usize;
     for (bi, bone) in bones.iter().enumerate() {
@@ -704,7 +725,7 @@ fn build_glb_content(
             mesh:        None,
             skin:        None,
             children:    Vec::new(),
-            extras:      None,
+            extras:      attach_extras.remove(&bi),
         });
     }
     // Build parent → children. parent == -1 → root bone (becomes a scene root).

@@ -20,6 +20,10 @@ Features:
   (`PROJ`) exported as empty nodes parented to the bone they ride on,
   with their parameters in the node's glTF `extras` (see
   [docs/fx-extras.md](docs/fx-extras.md))
+- Attachment points — `ATT_` / `ATVL` written into the `extras` of the
+  bone node that carries them, so `Ref_Head` or `Ref_Weapon Right` is
+  findable in-engine by its authored name (see
+  [docs/attachments.md](docs/attachments.md))
 - Z-up → Y-up bake on rest pose, animations and AABB
 - Zero-copy `mmap` parsing, SIMD geometry transforms (AVX2 / SSE4.1 /
   scalar), rayon-parallel mesh conversion

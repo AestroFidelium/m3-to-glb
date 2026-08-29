@@ -6,6 +6,7 @@
 //! these modules.
 
 pub mod assets;
+pub mod attach;
 pub mod cli;
 pub mod fx;
 pub mod glb;

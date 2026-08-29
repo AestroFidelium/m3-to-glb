@@ -17,8 +17,8 @@
 //! Instead we look up tags directly by their LE name.
 
 use super::structures::{
-    Bat, Bone, Cmp, Cms, Div, Iref, Layr, Lite, Matm, MdIndexEntry, Par, Proj, Quat, Reference,
-    Regn, Schr, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec3,
+    Att, Atvl, Bat, Bone, Cmp, Cms, Div, Iref, Layr, Lite, Matm, MdIndexEntry, Par, Proj, Quat,
+    Reference, Regn, Schr, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec3,
 };
 use super::{M3Version, detect_version};
 use anyhow::{Result, ensure};
@@ -39,6 +39,12 @@ const TAG_BATCHES: &[u8; 4] = b"_TAB"; // "BAT_"
 const TAG_PAR: &[u8; 4] = b"_RAP"; // "PAR_" — particle systems
 const TAG_LITE: &[u8; 4] = b"ETIL"; // "LITE" — lights
 const TAG_PROJ: &[u8; 4] = b"JORP"; // "PROJ" — projections (decals)
+
+// Attachment tags. Located by name for the same reason as the effect tags
+// above: MODL.attachment_points sits past the version-dependent part of the
+// header, while the file carries at most one ATT_ / ATVL tag.
+const TAG_ATT: &[u8; 4] = b"_TTA"; // "ATT_" — attachment points
+const TAG_ATVL: &[u8; 4] = b"LVTA"; // "ATVL" — attachment volumes
 
 /// Widen a PAR_ v22/v23 record into the v24 [`Par`] layout.
 ///
@@ -350,6 +356,33 @@ impl<'data> M3File<'data> {
         self.read_versioned_tag::<Proj>(TAG_PROJ, 5, "PROJ")
     }
 
+    /// ATT_ attachment points (version 1 only), or an empty vec.
+    ///
+    /// Each entry is a *name* plus the bone that carries it. The bone usually
+    /// carries the same name, but not always — a volume attachment stores
+    /// `Ref_Target` in ATT_ while its bone is called `Vol_Target` — which is
+    /// why the table is read instead of matching bone names.
+    pub fn attachment_points(&self) -> Result<Vec<Att>> {
+        self.read_versioned_tag::<Att>(TAG_ATT, 1, "ATT_")
+    }
+
+    /// Whether the file declares any attachment points at all.
+    ///
+    /// Cheaper than [`Self::attachment_points`] and, unlike it, silent on an
+    /// unreadable version — callers use it to decide whether the skeleton has
+    /// to be emitted before they know how many bones there are.
+    pub fn has_attachment_points(&self) -> bool {
+        self.find_tag(TAG_ATT).is_some_and(|i| self.tags[i].repetitions > 0)
+    }
+
+    /// ATVL attachment volumes (version 0 only), or an empty vec.
+    ///
+    /// A hit/target volume bound to the same bone as one of the attachment
+    /// points above.
+    pub fn attachment_volumes(&self) -> Result<Vec<Atvl>> {
+        self.read_versioned_tag::<Atvl>(TAG_ATVL, 0, "ATVL")
+    }
+
     /// Read a whole tag as `T`, but only when its version is the one `T`
     /// describes. A version mismatch is a skip (empty vec + warning), never an
     /// error: a model whose effects we cannot read still converts its geometry.
@@ -365,7 +398,7 @@ impl<'data> M3File<'data> {
         let entry = &self.tags[idx];
         if entry.version != want_version {
             tracing::warn!(
-                "{} version {} is not supported (only v{}) — {} effect(s) skipped",
+                "{} version {} is not supported (only v{}) — {} record(s) skipped",
                 name,
                 entry.version,
                 want_version,

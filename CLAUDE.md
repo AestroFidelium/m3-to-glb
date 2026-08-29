@@ -39,6 +39,7 @@ Five-stage pipeline in `main.rs::run_conversion()`:
 | `src/processor/soa.rs` | `MeshDataSoA` — SoA vertex arrays, `as_bytes*` serialisers |
 | `src/processor/transform.rs` | SIMD position/normal/UV/tangent extraction |
 | `src/fx/mod.rs` | `collect()` — `PAR_`/`LITE`/`PROJ` → effect nodes + `extras` JSON (see `docs/fx-extras.md`) |
+| `src/attach.rs` | `collect()` — `ATT_`/`ATVL` → `m3attach` extras on the bone node (see `docs/attachments.md`) |
 | `src/fx/curves.rs` | `FxCurves` — emitter tracks resolved out of `STC_` (rate, burst, speed, …) |
 | `src/glb/mod.rs` | Binary GLB assembler, material alpha/double-sided logic |
 | `src/glb/json_builder.rs` | glTF JSON manifest builder |
@@ -66,5 +67,10 @@ returns empty and bones/animations are emitted anyway, because that is what
 moves the emitters — and emitter values are mostly *animated*, so
 `fx::curves` resolves the rate/burst/speed tracks out of `STC_` rather than
 trusting the static defaults (which are usually zero).
+
+**Attachment names are not bone names** — an attachment point is a bone plus a
+name in `ATT_`, and the two usually match, but not always: `Ref_Target` rides a
+bone called `Vol_Target`. Matching `Ref_*` node names instead of reading the
+table silently loses exactly the volume attachments (`src/attach.rs`).
 
 `M3File` never casts `ModelHeader` directly — the actual data layout doesn't match; tags are navigated by searching `tags[]` for LE names.
