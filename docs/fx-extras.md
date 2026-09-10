@@ -57,7 +57,7 @@ one of the 127 emitters in the Jaina asset set.
 | Times | seconds |
 | Colours | straight `[r, g, b, a]` in `0…1`, **not** linearised (same convention the material path uses) |
 | Local directions | the **bone's** frame, where `+Z` is the emission axis. The Z-up → Y-up fix is baked into the root bone only, so a bone-local axis is unchanged |
-| `gravity` | a scalar pulling along **world −Y** — M3's world −Z after the axis fix |
+| `gravity` | a **signed** acceleration along **world +Y** — the vertical component of M3's acceleration triple (the other two are pinned to zero), carried through the Z-up → Y-up fix with its sign intact. Negative pulls down, positive lifts; use it as-is, do not multiply it by a "down" vector |
 | `texture` | `"#TextureN"`, an index into this same file's glTF `textures` array. In Bevy: `asset_server.load(format!("{glb_path}{slot}"))` |
 
 ## Static values and animated ones
