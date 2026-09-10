@@ -367,9 +367,11 @@ fn build_effect(p: &Particle) -> EffectAsset {
 
     let texture_slot = p.texture.is_some().then(|| writer.lit(0u32).expr());
 
-    // Gravity pulls along world −Y. Built here, before the module is closed,
-    // like every other expression the effect needs.
-    let accel = (p.gravity != 0.0).then(|| writer.lit(Vec3::NEG_Y * p.gravity).expr());
+    // `gravity` is already a signed world-Y acceleration — negative falls,
+    // positive rises — so it is used as-is. Multiplying it by a "down" vector
+    // flips every emitter that has one. Built here, before the module is
+    // closed, like every other expression the effect needs.
+    let accel = (p.gravity != 0.0).then(|| writer.lit(Vec3::Y * p.gravity).expr());
     let drag = writer.lit(p.drag).expr();
 
     let mut module = writer.finish();
@@ -395,8 +397,8 @@ fn build_effect(p: &Particle) -> EffectAsset {
         })
         // M3's own local/world flag decides whether particles ride the bone or
         // are left behind in the world once spawned. Anything under gravity is
-        // simulated in the world regardless: gravity pulls along world −Y, which
-        // means nothing inside a bone's rotating frame.
+        // simulated in the world regardless: gravity is a world-Y acceleration,
+        // which means nothing inside a bone's rotating frame.
         .with_simulation_space(if p.space == "world" || p.gravity != 0.0 {
             SimulationSpace::Global
         } else {

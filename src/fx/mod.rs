@@ -28,8 +28,11 @@
 //!   * emitter-local directions stay in the **bone's** local frame, where +Z is
 //!     the emission axis — unchanged by the Z-up → Y-up fix, which is baked into
 //!     the root bone only;
-//!   * `gravity` is a scalar pulling along **world −Y** (glTF world), because
-//!     the M3 world −Z became −Y.
+//!   * `gravity` is a **signed** acceleration along **world +Y** (glTF world) —
+//!     the vertical component of M3's acceleration triple, carried through the
+//!     Z-up → Y-up fix with its sign intact. Negative pulls down, positive
+//!     lifts. Use it as-is; multiplying it by a "down" vector inverts every
+//!     emitter that has one.
 
 pub mod curves;
 
