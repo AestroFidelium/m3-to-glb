@@ -46,7 +46,7 @@ jobs:
             cp target/${{ matrix.target }}/release/m3-to-glb "$name"/
             tar czf "$name.tar.gz" "$name"
           fi
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: m3-to-glb-*.${{ matrix.archive }}
           generate_release_notes: true
