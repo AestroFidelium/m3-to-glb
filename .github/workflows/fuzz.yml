@@ -1,0 +1,46 @@
+name: Fuzz
+
+# Long libFuzzer runs of every bolero target. The corpus is cached between runs
+# so each night starts where the last one stopped.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes per target
+        default: "20"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_whole_pipeline
+          - fuzz_parse_never_panics
+          - fuzz_texture_lookup
+          - detect_version_never_panics_on_any_bytes
+          - offsets_fit_within_stride
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-bolero
+      - uses: actions/cache@v4
+        with:
+          path: tests/__fuzz__/*/corpus
+          key: corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: corpus-${{ matrix.target }}-
+      - run: cargo bolero test --profile fuzz ${{ matrix.target }} -T ${{ inputs.minutes || '20' }}min
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.target }}
+          path: tests/__fuzz__/*/crashes/

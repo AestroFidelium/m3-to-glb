@@ -1,0 +1,52 @@
+name: Release
+
+# Push a `v*` tag to build the CLI for Linux, Windows and macOS and attach the
+# archives to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      # Release binaries are built on stable, without the nightly dev tuning.
+      - run: rm .cargo/config.toml rust-toolchain.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          name=m3-to-glb-${GITHUB_REF_NAME}-${{ matrix.target }}
+          mkdir "$name"
+          cp README.md LICENSE "$name"/
+          if [ "${{ matrix.archive }}" = zip ]; then
+            cp target/${{ matrix.target }}/release/m3-to-glb.exe "$name"/
+            7z a "$name.zip" "$name"
+          else
+            cp target/${{ matrix.target }}/release/m3-to-glb "$name"/
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: m3-to-glb-*.${{ matrix.archive }}
+          generate_release_notes: true

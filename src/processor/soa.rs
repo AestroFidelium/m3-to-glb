@@ -26,23 +26,35 @@ pub struct RegionPrimitiveInfo {
 #[derive(Default)]
 pub struct MeshDataSoA {
     // ── Positions (hot data — touched on every transform) ───────────────────
+    /// Position X per vertex.
     pub positions_x: Vec<f32>,
+    /// Position Y per vertex.
     pub positions_y: Vec<f32>,
+    /// Position Z per vertex.
     pub positions_z: Vec<f32>,
 
     // ── Normals ─────────────────────────────────────────────────────────────
+    /// Unit normal X.
     pub normals_x: Vec<f32>,
+    /// Unit normal Y.
     pub normals_y: Vec<f32>,
+    /// Unit normal Z.
     pub normals_z: Vec<f32>,
 
     // ── Tangents ────────────────────────────────────────────────────────────
+    /// Unit tangent X.
     pub tangents_x: Vec<f32>,
+    /// Unit tangent Y.
     pub tangents_y: Vec<f32>,
+    /// Unit tangent Z.
     pub tangents_z: Vec<f32>,
-    pub tangents_w: Vec<f32>, // bitangent sign
+    /// Bitangent sign, ±1.
+    pub tangents_w: Vec<f32>,
 
     // ── UV coordinates ──────────────────────────────────────────────────────
+    /// Texture coordinate U (first UV set).
     pub uvs_u: Vec<f32>,
+    /// Texture coordinate V.
     pub uvs_v: Vec<f32>,
 
     // ── Skinning ────────────────────────────────────────────────────────────
@@ -57,12 +69,14 @@ pub struct MeshDataSoA {
     pub has_skin: bool,
 
     // ── Triangles ───────────────────────────────────────────────────────────
+    /// Triangle list, three indices per triangle, into this mesh's vertices.
     pub indices: Vec<u32>,
 
     // ── Metadata ────────────────────────────────────────────────────────────
 
-    /// AABB (bounding box) — computed during conversion.
+    /// Lower corner of the bounding box — computed during conversion.
     pub aabb_min: [f32; 3],
+    /// Upper corner of the bounding box.
     pub aabb_max: [f32; 3],
 
     /// Per-region primitive info (for multi-material meshes).
@@ -73,6 +87,7 @@ pub struct MeshDataSoA {
 }
 
 impl MeshDataSoA {
+    /// An empty mesh with an inverted (empty) bounding box.
     pub fn new() -> Self {
         Self {
             aabb_min: [f32::MAX; 3],
@@ -179,6 +194,7 @@ impl MeshDataSoA {
         out
     }
 
+    /// Normals as interleaved little-endian `[f32; 3]`.
     pub fn normals_as_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 12);
         for i in 0..self.vertex_count() {
@@ -189,6 +205,7 @@ impl MeshDataSoA {
         out
     }
 
+    /// UVs as interleaved little-endian `[f32; 2]`.
     pub fn uvs_as_bytes(&self) -> Vec<u8> {
         self.uvs_as_bytes_scaled(1.0, 1.0)
     }

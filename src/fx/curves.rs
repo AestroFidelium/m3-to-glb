@@ -197,7 +197,7 @@ pub fn peak_window(curves: &[(&str, &[(f32, f32)])]) -> Option<(f32, f32, f32)> 
     best
 }
 
-/// `[[t,v],…]`, decimated to [`MAX_KEYS`].
+/// `[[t,v],…]`, decimated to 48 keys (endpoints kept).
 #[must_use]
 pub fn real_json(curve: &[(f32, f32)]) -> String {
     let mut out = String::from("[");
@@ -211,7 +211,7 @@ pub fn real_json(curve: &[(f32, f32)]) -> String {
     out
 }
 
-/// `[[t,[x,y,z]],…]`, decimated to [`MAX_KEYS`].
+/// `[[t,[x,y,z]],…]`, decimated to 48 keys (endpoints kept).
 #[must_use]
 pub fn vec3_json(curve: &[(f32, [f32; 3])]) -> String {
     let mut out = String::from("[");

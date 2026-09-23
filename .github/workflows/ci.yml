@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  lint:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --lib --no-default-features --locked -- -D warnings
+      - run: cargo doc --no-deps --no-default-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --all-features --locked
+      - run: cargo test --doc --all-features --locked
+
+  stable:
+    # The published crate must build without the nightly dev tuning.
+    name: stable / MSRV
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: ["1.88", stable]
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm .cargo/config.toml rust-toolchain.toml
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.toolchain }}
+      - run: cargo build --lib --no-default-features --locked
+      - run: cargo build --all-features --locked
+      - if: matrix.toolchain == 'stable'
+        run: cargo test --all-features --locked
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Measure
+        # Coverage instrumentation needs the LLVM backend, not cranelift.
+        env:
+          CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
+        run: |
+          cargo llvm-cov --all-features --locked --lcov --output-path lcov.info
+          cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  fuzz-smoke:
+    # Two minutes of real libFuzzer per target on every push. The long runs are
+    # in fuzz.yml.
+    name: fuzz (smoke)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_whole_pipeline, fuzz_parse_never_panics]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-bolero
+      - run: cargo bolero test --profile fuzz ${{ matrix.target }} -T 120s
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.target }}
+          path: tests/__fuzz__/*/crashes/

@@ -106,6 +106,7 @@ impl TextureCache {
         self.map.len()
     }
 
+    /// Whether no texture was indexed (always true for [`Self::empty`]).
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }

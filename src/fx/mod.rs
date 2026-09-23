@@ -70,14 +70,19 @@ pub struct FxItem {
     pub bone:       usize,
     /// `MATM` index whose texture/blend the effect draws with, when it has one.
     pub matm_index: Option<usize>,
+    /// The effect record itself.
     pub kind:       FxKind,
 }
 
+/// The three kinds of effect M3 attaches to bones.
 pub enum FxKind {
     // `Par` is 1496 bytes and `Proj` 388; both are boxed so that a model whose
     // effects are mostly lights does not pay for the largest variant.
+    /// A particle system (`PAR_`), widened to the v24 layout.
     Particle(Box<Par>),
+    /// A point or spot light (`LITE`).
     Light(Box<Lite>),
+    /// A projected ground decal (`PROJ`).
     Decal(Box<Proj>),
 }
 

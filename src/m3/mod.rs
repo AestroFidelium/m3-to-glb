@@ -35,8 +35,11 @@ pub fn parse(data: &[u8]) -> Result<M3File<'_>> {
 // ─── Magic-byte constants ────────────────────────────────────────────────────
 // Magic is stored as little-endian u32, so the bytes are reversed:
 //   "MD34" as a string → on disk: b"43DM"
+/// On-disk magic of an MD34 file (StarCraft II, Heroes of the Storm).
 pub const MAGIC_MD34: [u8; 4] = *b"43DM";
+/// On-disk magic of an MD33 file (early StarCraft II betas).
 pub const MAGIC_MD33: [u8; 4] = *b"33DM";
+/// On-disk magic of an MD32 file.
 pub const MAGIC_MD32: [u8; 4] = *b"23DM";
 
 /// Inspect the magic bytes at the start of the file.
@@ -61,9 +64,13 @@ pub fn detect_version(data: &[u8]) -> Result<M3Version> {
     }
 }
 
+/// M3 header variant, from the file's magic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum M3Version {
+    /// `MD32`.
     Md32,
+    /// `MD33`.
     Md33,
+    /// `MD34` — every shipping StarCraft II / Heroes of the Storm model.
     Md34,
 }

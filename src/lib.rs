@@ -52,6 +52,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod assets;
 pub mod attach;

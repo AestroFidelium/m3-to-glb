@@ -11,9 +11,16 @@ readme = "README.md"
 authors = ["AestroFidelium"]
 keywords = ["gltf", "m3", "starcraft2", "blizzard", "reverse-engineering"]
 categories = ["game-development", "graphics", "parser-implementations", "command-line-utilities", "encoding"]
-exclude = [
-  "/.cargo", "/.github", "/.claude", "/flake.*", "/scripts", "/integration",
-  "/CLAUDE.md", "*.m3", "*.m3a", "*.glb", "*.png",
+# Whitelist: the working tree holds game assets and reference tools that must
+# never ship.
+include = [
+  "/src/**/*.rs",
+  "/tests/*.rs",
+  "/tests/common/*.rs",
+  "/docs/*.md",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
 ]
 
 [package.metadata.docs.rs]

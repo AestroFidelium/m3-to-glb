@@ -2,11 +2,13 @@
 //!
 //! ## What an M3 actually looks like (from a tag dump)
 //!
+//! ```text
 //!   tags[21] "__8U"  count=1332640  — vertex buffer (count = bytes)
 //!   tags[22] "_VID"  count=1        — DIV_  (1 Division)
 //!   tags[23] "_61U"  count=113646   — u16 indices (count = elements)
 //!   tags[25] "NGER"  count=3        — REGN  (3 regions)
 //!   tags[18] "ENOB"  count=2        — BONE
+//! ```
 //!
 //! All tag names are ASCII inside a little-endian u32 (so the bytes are
 //! reversed):
@@ -169,6 +171,13 @@ impl std::fmt::Debug for M3File<'_> {
 }
 
 impl<'data> M3File<'data> {
+    /// Parse the header and tag table of `data`. Tags are read lazily by the
+    /// accessors; nothing is copied here.
+    ///
+    /// # Errors
+    ///
+    /// Unknown magic, or a tag table that does not fit in (or is not aligned
+    /// within) `data`.
     pub fn from_bytes(data: &'data [u8]) -> Result<Self> {
         let version = detect_version(data)?;
 
@@ -214,11 +223,13 @@ impl<'data> M3File<'data> {
 
     // ── Statistics ──────────────────────────────────────────────────────────
 
+    /// Number of `REGN` tags — mesh regions.
     pub fn mesh_count(&self) -> usize {
         // Number of REGN tags = number of regions (sub-meshes).
         self.tags.iter().filter(|t| t.tag_bytes() == *b"NGER").count()
     }
 
+    /// Number of `MAT_` materials.
     pub fn material_count(&self) -> usize {
         // MAT_ count = repetitions of elements in the _TAM tag.
         self.tags
@@ -285,6 +296,7 @@ impl<'data> M3File<'data> {
         Ok(out)
     }
 
+    /// Number of bones in the `BONE` tag.
     pub fn bone_count(&self) -> usize {
         self.tags
             .iter()
@@ -354,7 +366,7 @@ impl<'data> M3File<'data> {
     /// [`Par`] describes **version 24** (Heroes of the Storm, SC2 Legacy of the
     /// Void). Versions 22 and 23 — War3 Reforged and older SC2 — differ from it
     /// by three fields and are widened to the v24 layout on read (see
-    /// [`upgrade_par`]); anything older grew in too many places to splice and is
+    /// `upgrade_par`); anything older grew in too many places to splice and is
     /// skipped with a warning rather than misread.
     pub fn particle_systems(&self) -> Result<Vec<Par>> {
         let Some(idx) = self.find_tag(TAG_PAR) else {
@@ -777,6 +789,7 @@ impl<'data> M3File<'data> {
         raw & 0xFF // low byte only
     }
 
+    /// `flags` of `MAT_` record `mat_idx` (+16). Bit `0x8` is two-sided.
     pub fn mat_flags(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 16).unwrap_or(0)
     }
@@ -1058,7 +1071,6 @@ impl<'data> M3File<'data> {
         self.read_ref_slice::<Sd3v>(r)
     }
 
-    /// Read the SD4Q block array referenced by `STC.sd4q`.
     /// SDS6 — `i16` keyframe blocks (`STC.sds6`).
     pub fn read_sds6(&self, r: &Reference) -> Result<Vec<Sds6>> {
         if r.entries == 0 { return Ok(Vec::new()); }
@@ -1095,6 +1107,7 @@ impl<'data> M3File<'data> {
         self.read_ref_slice::<f32>(r)
     }
 
+    /// SD4Q — quaternion keyframe blocks (`STC.sd4q`).
     pub fn read_sd4q(&self, r: &Reference) -> Result<Vec<Sd4q>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd4q>(r)
@@ -1102,6 +1115,8 @@ impl<'data> M3File<'data> {
 
     // ── Tag lookup ──────────────────────────────────────────────────────────
 
+    /// Index of the first tag named `tag_le` — the on-disk, byte-reversed
+    /// spelling (`b"_VID"` for `DIV_`).
     pub fn find_tag(&self, tag_le: &[u8; 4]) -> Option<usize> {
         self.tags.iter().position(|t| t.tag_bytes() == *tag_le)
     }

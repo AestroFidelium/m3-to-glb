@@ -38,40 +38,57 @@ const ZY_QUAT: [f32; 4] = [
     std::f32::consts::FRAC_1_SQRT_2,
 ];
 
+/// The node property an animation channel drives.
 #[derive(Debug, Clone, Copy)]
 pub enum Path {
+    /// `translation` (VEC3).
     Translation,
+    /// `rotation` (VEC4 quaternion, xyzw).
     Rotation,
+    /// `scale` (VEC3).
     Scale,
 }
 
+/// A sampler's output values, one per input time.
 #[derive(Debug, Clone)]
 pub enum SamplerData {
+    /// Translations or scales.
     Vec3(Vec<[f32; 3]>),
+    /// Unit quaternions, hemisphere-aligned for linear interpolation.
     Quat(Vec<[f32; 4]>),
 }
 
+/// One keyframe track.
 #[derive(Debug, Clone)]
 pub struct Sampler {
     /// Frame timestamps in seconds (ms→s, divide by 1000).
     pub times_sec: Vec<f32>,
+    /// Values at `times_sec`.
     pub data:      SamplerData,
     /// LINEAR vs STEP. For bone TRS we always use LINEAR — see
-    /// [`build_vec3_sampler`] / [`build_quat_sampler`] for the reasoning.
+    /// `build_vec3_sampler` / `build_quat_sampler` for the reasoning.
     pub linear:    bool,
 }
 
+/// Binds a sampler to a bone node property.
 #[derive(Debug, Clone)]
 pub struct Channel {
+    /// Index into [`Animation::samplers`].
     pub sampler:     usize,
-    pub target_node: usize, // node index of the bone
+    /// glTF node index of the bone.
+    pub target_node: usize,
+    /// Which property of that node.
     pub path:        Path,
 }
 
+/// One clip — an M3 `STC_` — in glTF terms.
 #[derive(Debug, Clone)]
 pub struct Animation {
+    /// Clip name as authored (`Stand_full`, `Walk A_full`, …).
     pub name:     String,
+    /// Keyframe tracks.
     pub samplers: Vec<Sampler>,
+    /// Which bone property each track drives.
     pub channels: Vec<Channel>,
 }
 

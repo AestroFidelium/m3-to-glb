@@ -1,3 +1,6 @@
+# Nightly is for development speed only — the cranelift backend and the mold
+# linker in `.cargo/config.toml`. The crate itself builds on stable (see
+# `rust-version` in Cargo.toml; CI checks it). Pinned so CI is reproducible.
 [toolchain]
-channel = "nightly"
-components = ["rust-src", "rustc-codegen-cranelift-preview"]
+channel = "nightly-2026-05-03"
+components = ["rust-src", "rustc-codegen-cranelift-preview", "clippy", "rustfmt", "llvm-tools-preview"]

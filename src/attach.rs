@@ -62,6 +62,7 @@ pub struct Attachment {
     pub name:   String,
     /// Index into the bone array, which is also the glTF node index.
     pub bone:   usize,
+    /// The `ATVL` hit / target volume on the same bone, if one exists.
     pub volume: Option<Volume>,
 }
 

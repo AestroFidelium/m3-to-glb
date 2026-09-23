@@ -90,13 +90,19 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 /// io_m3.py:144 `get_vertex_description`.
 #[derive(Debug, Clone)]
 pub struct VertexOffsets {
+    /// Compressed normal + bitangent sign byte (`0x800000`).
     pub normal:  Option<usize>,
+    /// First int16 UV set (`0x20000`).
     pub uv0:     Option<usize>,
+    /// Second int16 UV set (`0x40000`).
     pub uv1:     Option<usize>,
+    /// Compressed tangent (`0x1000000`).
     pub tangent: Option<usize>,
+    /// Bone weights and lookups (`0x20` / `0x40`).
     pub skin:    Option<SkinLayout>,
 }
 
+/// Where a vertex keeps its bone weights and bone-lookup indices.
 #[derive(Debug, Clone, Copy)]
 pub struct SkinLayout {
     /// Offset of `weights[0..pairs]` (uint8 each) from the vertex start.
@@ -112,6 +118,8 @@ impl VertexOffsets {
     /// (io_m3.py:144 `get_vertex_description`).
     ///
     /// Layout (typical flags=0x01860261, stride=40):
+    ///
+    /// ```text
     ///   +0:  pos       [f32;3]                    12B  (0x1)
     ///   +12: weights[N] uint8×pairs                NB  (skin0/skin1: pairs=2 or 4)
     ///   +12+N: lookups[N] uint8×pairs              NB
@@ -124,6 +132,7 @@ impl VertexOffsets {
     ///   ...: uvN      [i16;2]                      4B each (0x20000..0x100000)
     ///   ...: normal_v3 / tangent_v3 [f32;3]       12B each (0x200000/0x400000)
     ///   ...: tangent  [u8;4]                       4B  (0x1000000)
+    /// ```
     pub fn from_flags(flags: u32) -> Self {
         let mut off: usize = 12; // pos always (0x1)
 

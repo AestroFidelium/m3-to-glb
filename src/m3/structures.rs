@@ -13,6 +13,9 @@
 //! - Versioned structs come with aliases like `pub type Bone = BoneV1;`.
 
 #![allow(dead_code, non_snake_case)]
+// Field names mirror `structures.xml` one to one; the file is the reference
+// for what each one means, and repeating it per field would be noise.
+#![allow(missing_docs)]
 
 use bytemuck::{Pod, Zeroable};
 

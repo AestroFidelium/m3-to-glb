@@ -1,0 +1,42 @@
+name: Conversion bug
+description: A model converts wrong, fails to convert, or crashes the converter.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The single most useful thing is **the model itself**. Attach the `.m3`
+        (and any `.m3a` you passed), or say which game file it is — e.g.
+        `mods/liberty.sc2mod/base.sc2assets/Assets/Units/Zerg/Ultralisk/Ultralisk.m3`.
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Game, path inside the game data, or an attachment below.
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command line
+      placeholder: m3-to-glb Ultralisk.m3 -t textures/ -a Ultralisk.m3a
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what you expected
+      description: Screenshots from a viewer (e.g. https://gltf-viewer.donmccurdy.com) help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Output of the same command with `-v debug`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`m3-to-glb --version`"
