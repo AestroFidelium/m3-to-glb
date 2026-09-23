@@ -40,7 +40,7 @@ jobs:
           restore-keys: corpus-${{ matrix.target }}-
       - run: cargo bolero test --profile fuzz ${{ matrix.target }} -T ${{ inputs.minutes || '20' }}min
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crashes-${{ matrix.target }}
           path: tests/__fuzz__/*/crashes/
