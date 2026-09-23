@@ -82,35 +82,36 @@ fn upgrade_par(raw: &[u8], version: u32) -> Par {
 /// in lockstep with [`crate::processor::VertexOffsets::from_flags`]: the
 /// offsets it computes plus each component's size must never exceed this
 /// stride (see the consistency property test in `tests/`).
+#[must_use]
 pub fn stride_from_flags(flags: u32) -> usize {
     let mut size: usize = 12; // pos (always present)
 
-    if flags & 0x000020 != 0 { size += 4; } // skin0: 2×(lookup+weight) = 4B
-    if flags & 0x000040 != 0 { size += 4; } // skin1: 2×(lookup+weight) = 4B
-    if flags & 0x000080 != 0 { size += 12; } // normalf (uncompressed normal)
-    if flags & 0x000100 != 0 { size += 4; } // test100
-    if flags & 0x000200 != 0 { size += 4; } // color (COL)
-    if flags & 0x000400 != 0 { size += 4; } // test400
-    if flags & 0x000800 != 0 { size += 4; } // test800
-    if flags & 0x001000 != 0 { size += 4; } // test1000
-    if flags & 0x002000 != 0 { size += 8; } // fuv0 (float vec2)
-    if flags & 0x004000 != 0 { size += 8; } // fuv1
-    if flags & 0x008000 != 0 { size += 8; } // fuv2
-    if flags & 0x010000 != 0 { size += 8; } // fuv3
-    if flags & 0x020000 != 0 { size += 4; } // uv0 (int16×2)
-    if flags & 0x040000 != 0 { size += 4; } // uv1
-    if flags & 0x080000 != 0 { size += 4; } // uv2
-    if flags & 0x100000 != 0 { size += 4; } // uv3
-    if flags & 0x200000 != 0 { size += 12; } // normalf2 (uncompressed normal #2)
-    if flags & 0x400000 != 0 { size += 12; } // tanf (uncompressed tangent)
-    if flags & 0x800000 != 0 { size += 4; } // normal (Vector3As3uint8 + sign)
-    if flags & 0x1000000 != 0 { size += 4; } // tangent (compressed)
-    if flags & 0x2000000 != 0 { size += 4; } // unknown
-    if flags & 0x4000000 != 0 { size += 12; } // unknown
-    if flags & 0x8000000 != 0 { size += 12; } // unknown
-    if flags & 0x10000000 != 0 { size += 4; } // unknown
-    if flags & 0x20000000 != 0 { size += 4; } // unknown
-    if flags & 0x40000000 != 0 { size += 4; } // uv4
+    if flags & 0x0000_0020 != 0 { size += 4; } // skin0: 2×(lookup+weight) = 4B
+    if flags & 0x0000_0040 != 0 { size += 4; } // skin1: 2×(lookup+weight) = 4B
+    if flags & 0x0000_0080 != 0 { size += 12; } // normalf (uncompressed normal)
+    if flags & 0x0000_0100 != 0 { size += 4; } // test100
+    if flags & 0x0000_0200 != 0 { size += 4; } // color (COL)
+    if flags & 0x0000_0400 != 0 { size += 4; } // test400
+    if flags & 0x0000_0800 != 0 { size += 4; } // test800
+    if flags & 0x0000_1000 != 0 { size += 4; } // test1000
+    if flags & 0x0000_2000 != 0 { size += 8; } // fuv0 (float vec2)
+    if flags & 0x0000_4000 != 0 { size += 8; } // fuv1
+    if flags & 0x0000_8000 != 0 { size += 8; } // fuv2
+    if flags & 0x0001_0000 != 0 { size += 8; } // fuv3
+    if flags & 0x0002_0000 != 0 { size += 4; } // uv0 (int16×2)
+    if flags & 0x0004_0000 != 0 { size += 4; } // uv1
+    if flags & 0x0008_0000 != 0 { size += 4; } // uv2
+    if flags & 0x0010_0000 != 0 { size += 4; } // uv3
+    if flags & 0x0020_0000 != 0 { size += 12; } // normalf2 (uncompressed normal #2)
+    if flags & 0x0040_0000 != 0 { size += 12; } // tanf (uncompressed tangent)
+    if flags & 0x0080_0000 != 0 { size += 4; } // normal (Vector3As3uint8 + sign)
+    if flags & 0x0100_0000 != 0 { size += 4; } // tangent (compressed)
+    if flags & 0x0200_0000 != 0 { size += 4; } // unknown
+    if flags & 0x0400_0000 != 0 { size += 12; } // unknown
+    if flags & 0x0800_0000 != 0 { size += 12; } // unknown
+    if flags & 0x1000_0000 != 0 { size += 4; } // unknown
+    if flags & 0x2000_0000 != 0 { size += 4; } // unknown
+    if flags & 0x4000_0000 != 0 { size += 4; } // uv4
 
     size
 }
@@ -187,8 +188,9 @@ impl<'data> M3File<'data> {
         //   +0  tag(4)           magic bytes
         //   +4  index_offset(4)  byte offset of tag table
         //   +8  index_size(4)    byte size of tag table
-        let index_offset = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
-        let index_size_bytes = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+        let header: [u32; 3] = bytemuck::pod_read_unaligned(&data[..12]);
+        let index_offset = header[1] as usize;
+        let index_size_bytes = header[2] as usize;
 
         let tag_size = std::mem::size_of::<MdIndexEntry>();
         let num_tags = index_size_bytes; // stored as count of entries, not byte size
@@ -224,36 +226,41 @@ impl<'data> M3File<'data> {
     // ── Statistics ──────────────────────────────────────────────────────────
 
     /// Number of `REGN` tags — mesh regions.
+    #[must_use]
     pub fn mesh_count(&self) -> usize {
         // Number of REGN tags = number of regions (sub-meshes).
         self.tags.iter().filter(|t| t.tag_bytes() == *b"NGER").count()
     }
 
     /// Number of `MAT_` materials.
+    #[must_use]
     pub fn material_count(&self) -> usize {
         // MAT_ count = repetitions of elements in the _TAM tag.
         self.tags
             .iter()
             .find(|t| t.tag_bytes() == *b"_TAM")
-            .map(|t| t.repetitions as usize)
-            .unwrap_or(0)
+            .map_or(0, |t| t.repetitions as usize)
     }
 
     /// Number of MADD materials (tag "DDAM"). MADD is a node-based material
-    /// system used by newer HotS models (Tracer etc.).
+    /// system used by newer `HotS` models (Tracer etc.).
+    #[must_use]
     pub fn madd_count(&self) -> usize {
         self.tags
             .iter()
             .find(|t| t.tag_bytes() == *b"DDAM")
-            .map(|t| t.repetitions as usize)
-            .unwrap_or(0)
+            .map_or(0, |t| t.repetitions as usize)
     }
 
     /// List of texture paths (CHAR strings) for the MADD at `madd_idx`.
     /// Returned in the order they appear in the file. MADD has no explicit
-    /// diff/norm/emis slot tags — the ordering is purely the HotS naming
+    /// diff/norm/emis slot tags — the ordering is purely the `HotS` naming
     /// convention (filename suffix `_diff` / `_norm` / `_emis` / `_spec` / `_ao`);
     /// see `slot_from_filename` in `glb/mod.rs`.
+    ///
+    /// # Errors
+    ///
+    /// The texture list reference is out of range.
     pub fn madd_texture_paths(&self, madd_idx: usize) -> Result<Vec<String>> {
         let Some(tag_idx) = self.find_tag(b"DDAM") else { return Ok(Vec::new()); };
         let entry = &self.tags[tag_idx];
@@ -272,20 +279,11 @@ impl<'data> M3File<'data> {
         if madd_idx >= entry.repetitions as usize { return Ok(Vec::new()); }
 
         let base = entry.offset as usize + madd_idx * file_elem_sz;
-        let r_start = base + tex_paths_off;
-        if r_start + 12 > self.data.len() { return Ok(Vec::new()); }
-
-        let entries = u32::from_le_bytes(self.data[r_start..r_start + 4].try_into().unwrap());
-        let index = u32::from_le_bytes(self.data[r_start + 4..r_start + 8].try_into().unwrap());
-        let flags = u32::from_le_bytes(self.data[r_start + 8..r_start + 12].try_into().unwrap());
-        let texture_paths_ref = Reference { entries, index, flags };
-
-        debug!(
-            "MADD[{}] v{} texture_paths: entries={} tag_idx={} flags={:#x}",
-            madd_idx, version, entries, index, flags
-        );
-
-        if entries == 0 { return Ok(Vec::new()); }
+        let Some(texture_paths_ref) = self.pod_at::<Reference>(base + tex_paths_off) else {
+            return Ok(Vec::new());
+        };
+        debug!("MADD[{}] v{} texture_paths: {:?}", madd_idx, version, texture_paths_ref);
+        if texture_paths_ref.entries == 0 { return Ok(Vec::new()); }
         let schrs: Vec<Schr> = self.read_ref_slice::<Schr>(&texture_paths_ref)?;
 
         let mut out = Vec::with_capacity(schrs.len());
@@ -297,12 +295,12 @@ impl<'data> M3File<'data> {
     }
 
     /// Number of bones in the `BONE` tag.
+    #[must_use]
     pub fn bone_count(&self) -> usize {
         self.tags
             .iter()
             .find(|t| t.tag_bytes() == *TAG_BONE)
-            .map(|t| t.repetitions as usize)
-            .unwrap_or(0)
+            .map_or(0, |t| t.repetitions as usize)
     }
 
     // ── Geometry ────────────────────────────────────────────────────────────
@@ -310,42 +308,31 @@ impl<'data> M3File<'data> {
     /// Read `vertex_flags` from the MODL tag (LE name "LDOM").
     /// The flags determine which components a vertex carries and how big it is.
     /// Offset of `vertex_flags` within MODL is 96 bytes (per structures.xml).
+    #[must_use]
     pub fn vertex_flags(&self) -> u32 {
         const VERTEX_FLAGS_OFFSET: usize = 96;
         // model_name(12) + flags(4) + sequences(12) + stc(12) + stg(12) +
         // bone_anim_sets(12) + split_count(4) + sts(12) + bones(12) + skin_bone_count(4) = 96
-        let Some(idx) = self.find_tag(b"LDOM") else {
-            return 0x180_007d;
-        };
-        let entry = &self.tags[idx];
-        let start = entry.offset as usize + VERTEX_FLAGS_OFFSET;
-        if start + 4 > self.data.len() {
-            return 0x180_007d;
-        }
-        u32::from_le_bytes(
-            self.data[start..start + 4]
-                .try_into()
-                .unwrap_or([0x7d, 0x00, 0x80, 0x01]),
-        )
+        // Without a readable MODL, assume the most common static layout.
+        const FALLBACK: u32 = 0x0180_007d;
+        self.find_tag(b"LDOM")
+            .and_then(|idx| self.pod_at(self.tags[idx].offset as usize + VERTEX_FLAGS_OFFSET))
+            .unwrap_or(FALLBACK)
     }
 
     /// Reads a Reference (12 bytes: entries, index, flags) at the given byte
     /// offset inside the MODL tag. Same offsets work across all MODL versions
-    /// for the prefix fields (up through bone_lookup at +124).
+    /// for the prefix fields (up through `bone_lookup` at +124).
     fn read_modl_ref(&self, field_offset: usize) -> Option<Reference> {
         let modl_idx = self.find_tag(b"LDOM")?;
-        let modl_off = self.tags[modl_idx].offset as usize;
-        let start = modl_off + field_offset;
-        if start + 12 > self.data.len() {
-            return None;
-        }
-        let entries = u32::from_le_bytes(self.data[start..start + 4].try_into().ok()?);
-        let index = u32::from_le_bytes(self.data[start + 4..start + 8].try_into().ok()?);
-        let flags = u32::from_le_bytes(self.data[start + 8..start + 12].try_into().ok()?);
-        Some(Reference { entries, index, flags })
+        self.pod_at(self.tags[modl_idx].offset as usize + field_offset)
     }
 
     /// MODL.bones (offset 80) → BONE tag entries.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn bones(&self) -> Result<Vec<Bone>> {
         match self.read_modl_ref(80) {
             Some(r) if r.entries > 0 => self.read_ref_slice::<Bone>(&r),
@@ -353,7 +340,11 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// MODL.bone_lookup (offset 124) → U16_ tag entries.
+    /// `MODL.bone_lookup` (offset 124) → U16_ tag entries.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn bone_lookup(&self) -> Result<Vec<u16>> {
         match self.read_modl_ref(124) {
             Some(r) if r.entries > 0 => self.read_ref_slice::<u16>(&r),
@@ -368,6 +359,10 @@ impl<'data> M3File<'data> {
     /// by three fields and are widened to the v24 layout on read (see
     /// `upgrade_par`); anything older grew in too many places to splice and is
     /// skipped with a warning rather than misread.
+    ///
+    /// # Errors
+    ///
+    /// The `PAR_` records run past the end of the file.
     pub fn particle_systems(&self) -> Result<Vec<Par>> {
         let Some(idx) = self.find_tag(TAG_PAR) else {
             return Ok(Vec::new());
@@ -405,13 +400,21 @@ impl<'data> M3File<'data> {
     }
 
     /// LITE lights (version 7 only), or an empty vec.
+    ///
+    /// # Errors
+    ///
+    /// The `LITE` records run past the end of the file.
     pub fn lights(&self) -> Result<Vec<Lite>> {
-        self.read_versioned_tag::<Lite>(TAG_LITE, 7, "LITE")
+        self.read_versioned_tag::<Lite>(*TAG_LITE, 7, "LITE")
     }
 
     /// PROJ projections — ground decals (version 5 only), or an empty vec.
+    ///
+    /// # Errors
+    ///
+    /// The `PROJ` records run past the end of the file.
     pub fn projections(&self) -> Result<Vec<Proj>> {
-        self.read_versioned_tag::<Proj>(TAG_PROJ, 5, "PROJ")
+        self.read_versioned_tag::<Proj>(*TAG_PROJ, 5, "PROJ")
     }
 
     /// ATT_ attachment points (version 1 only), or an empty vec.
@@ -420,8 +423,12 @@ impl<'data> M3File<'data> {
     /// carries the same name, but not always — a volume attachment stores
     /// `Ref_Target` in ATT_ while its bone is called `Vol_Target` — which is
     /// why the table is read instead of matching bone names.
+    ///
+    /// # Errors
+    ///
+    /// The `ATT_` records run past the end of the file.
     pub fn attachment_points(&self) -> Result<Vec<Att>> {
-        self.read_versioned_tag::<Att>(TAG_ATT, 1, "ATT_")
+        self.read_versioned_tag::<Att>(*TAG_ATT, 1, "ATT_")
     }
 
     /// Whether the file declares any attachment points at all.
@@ -429,6 +436,7 @@ impl<'data> M3File<'data> {
     /// Cheaper than [`Self::attachment_points`] and, unlike it, silent on an
     /// unreadable version — callers use it to decide whether the skeleton has
     /// to be emitted before they know how many bones there are.
+    #[must_use]
     pub fn has_attachment_points(&self) -> bool {
         self.find_tag(TAG_ATT).is_some_and(|i| self.tags[i].repetitions > 0)
     }
@@ -437,8 +445,12 @@ impl<'data> M3File<'data> {
     ///
     /// A hit/target volume bound to the same bone as one of the attachment
     /// points above.
+    ///
+    /// # Errors
+    ///
+    /// The `ATVL` records run past the end of the file.
     pub fn attachment_volumes(&self) -> Result<Vec<Atvl>> {
-        self.read_versioned_tag::<Atvl>(TAG_ATVL, 0, "ATVL")
+        self.read_versioned_tag::<Atvl>(*TAG_ATVL, 0, "ATVL")
     }
 
     /// Read a whole tag as `T`, but only when its version is the one `T`
@@ -446,11 +458,11 @@ impl<'data> M3File<'data> {
     /// error: a model whose effects we cannot read still converts its geometry.
     fn read_versioned_tag<T: bytemuck::Pod>(
         &self,
-        tag_le: &[u8; 4],
+        tag_le: [u8; 4],
         want_version: u32,
         name: &str,
     ) -> Result<Vec<T>> {
-        let Some(idx) = self.find_tag(tag_le) else {
+        let Some(idx) = self.find_tag(&tag_le) else {
             return Ok(Vec::new());
         };
         let entry = &self.tags[idx];
@@ -468,8 +480,12 @@ impl<'data> M3File<'data> {
     }
 
     /// IREF entries (per-bone inverse rest matrices). Found by tag b"FERI"
-    /// rather than via MODL.bone_rests, since the bone_rests offset moves
+    /// rather than via `MODL.bone_rests`, since the `bone_rests` offset moves
     /// across MODL versions but only one IREF tag exists per file.
+    ///
+    /// # Errors
+    ///
+    /// The `IREF` records run past the end of the file.
     pub fn bone_rests(&self) -> Result<Vec<Iref>> {
         match self.find_tag(b"FERI") {
             Some(idx) => self.read_tag_slice::<Iref>(idx),
@@ -483,6 +499,7 @@ impl<'data> M3File<'data> {
     /// with neither a vertex buffer nor a division. That is a legitimate model,
     /// not a truncated one, so callers check this instead of treating the
     /// missing tags as a parse failure.
+    #[must_use]
     pub fn has_geometry(&self) -> bool {
         self.find_tag(TAG_VERTICES).is_some() && self.find_tag(TAG_DIV).is_some()
     }
@@ -497,6 +514,10 @@ impl<'data> M3File<'data> {
     }
 
     /// Vertex buffer — raw bytes (tag "__8U", count = bytes).
+    ///
+    /// # Errors
+    ///
+    /// There is no `U8__` vertex tag, or it runs past the end of the file.
     pub fn vertex_data(&self) -> Result<&'data [u8]> {
         let idx = self
             .find_tag(TAG_VERTICES)
@@ -513,6 +534,10 @@ impl<'data> M3File<'data> {
     }
 
     /// All Divisions (tag "_VID", count = element count).
+    ///
+    /// # Errors
+    ///
+    /// There is no `DIV_` tag, or it runs past the end of the file.
     pub fn divisions(&self) -> Result<Vec<Div>> {
         let idx = self
             .find_tag(TAG_DIV)
@@ -523,6 +548,10 @@ impl<'data> M3File<'data> {
     /// Regions of a Division — addressed via the Reference inside the Division.
     /// Returns the regions and the REGN tag version (needed for the v≤2 face
     /// fix-up in `processor`).
+    ///
+    /// # Errors
+    ///
+    /// The division's region reference is outside the tag table.
     pub fn regions(&self, div: &Div) -> Result<(Vec<Regn>, u32)> {
         if div.regions.entries == 0 {
             return Ok((Vec::new(), 0));
@@ -577,8 +606,8 @@ impl<'data> M3File<'data> {
                 // Map to RegnV5 (48B): id(4) unknown01(4) first_vtx u32 vtx_count u32 ...
                 buf[0..4].copy_from_slice(&raw[0..4]); // id
                 // unknown01 = 0 (already in buf)
-                let fv = u16::from_le_bytes([raw[4], raw[5]]) as u32;
-                let vc = u16::from_le_bytes([raw[6], raw[7]]) as u32;
+                let fv = u32::from(u16::from_le_bytes([raw[4], raw[5]]));
+                let vc = u32::from(u16::from_le_bytes([raw[6], raw[7]]));
                 buf[8..12].copy_from_slice(&fv.to_le_bytes());
                 buf[12..16].copy_from_slice(&vc.to_le_bytes());
                 buf[16..28].copy_from_slice(&raw[8..20]); // first_face..bone_lookup_count
@@ -602,11 +631,19 @@ impl<'data> M3File<'data> {
     }
 
     /// u16 triangle indices for a Division.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn face_indices(&self, div: &Div) -> Result<Vec<u16>> {
         self.read_ref_slice::<u16>(&div.faces)
     }
 
     /// Batch records of a Division (BAT_).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn batches(&self, div: &Div) -> Result<Vec<Bat>> {
         self.read_ref_slice::<Bat>(&div.batches)
     }
@@ -614,6 +651,10 @@ impl<'data> M3File<'data> {
     // ── Materials ───────────────────────────────────────────────────────────
 
     /// Material references (MATM, tag b"MTAM").
+    ///
+    /// # Errors
+    ///
+    /// The `MATM` records run past the end of the file.
     pub fn material_references(&self) -> Result<Vec<Matm>> {
         match self.find_tag(b"MTAM") {
             Some(idx) => self.read_tag_slice::<Matm>(idx),
@@ -661,6 +702,7 @@ impl<'data> M3File<'data> {
 
     /// For every MATM entry, the renderable MATM index it resolves to (following
     /// `CMP_` composites), or `None` if unrepresentable. Indexed by MATM index.
+    #[must_use]
     pub fn resolved_material_refs(&self) -> Vec<Option<usize>> {
         let matms = self.material_references().unwrap_or_default();
         let composites = self.composites();
@@ -767,22 +809,17 @@ impl<'data> M3File<'data> {
         let entry = &self.tags[tag_idx];
         let version = entry.version;
         let file_elem_sz = mat_record_size(version);
-        let base = entry.offset as usize + mat_idx * file_elem_sz;
-        let end = base + field_offset + 4;
-        if end > self.data.len() {
-            return None;
-        }
-        Some(u32::from_le_bytes(
-            self.data[base + field_offset..end].try_into().ok()?,
-        ))
+        self.pod_at(entry.offset as usize + mat_idx * file_elem_sz + field_offset)
     }
 
     /// `blend_mode` from MAT_ (+20). 0=Opaque,1=Blend,2=Erase,3=Add,4=AddAlpha,5=Mod,6=Mod2x.
+    #[must_use]
     pub fn mat_blend_mode(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 20).unwrap_or(0)
     }
 
     /// `alpha_test_threshold` from MAT_ (+40). Stored as uint8 in the low byte of a u32.
+    #[must_use]
     pub fn mat_alpha_threshold(&self, mat_idx: usize) -> u32 {
         // The field is uint8 but read as a u32 LE — the real value lives in the low byte.
         let raw = self.mat_read_u32(mat_idx, 40).unwrap_or(0);
@@ -790,6 +827,7 @@ impl<'data> M3File<'data> {
     }
 
     /// `flags` of `MAT_` record `mat_idx` (+16). Bit `0x8` is two-sided.
+    #[must_use]
     pub fn mat_flags(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 16).unwrap_or(0)
     }
@@ -804,38 +842,9 @@ impl<'data> M3File<'data> {
         let layer_off = Self::mat_layer_offset(version, layer)?;
 
         let base = entry.offset as usize + mat_idx * file_elem_sz;
-        let field_end = base + layer_off + 12; // Reference = 12 bytes
-        if field_end > self.data.len() {
-            debug!("MAT_[{}] layer '{}' out of bounds", mat_idx, layer);
-            return None;
-        }
-
-        let entries = u32::from_le_bytes(
-            self.data[base + layer_off..base + layer_off + 4]
-                .try_into()
-                .ok()?,
-        );
-        let index = u32::from_le_bytes(
-            self.data[base + layer_off + 4..base + layer_off + 8]
-                .try_into()
-                .ok()?,
-        );
-        let flags = u32::from_le_bytes(
-            self.data[base + layer_off + 8..base + layer_off + 12]
-                .try_into()
-                .ok()?,
-        );
-
-        debug!(
-            "MAT_[{}] v{} layer '{}' at +{}: entries={} index={} flags={:#x}",
-            mat_idx, version, layer, layer_off, entries, index, flags
-        );
-
-        Some(Reference {
-            entries,
-            index,
-            flags,
-        })
+        let r = self.pod_at::<Reference>(base + layer_off);
+        debug!("MAT_[{}] v{} layer '{}' at +{}: {:?}", mat_idx, version, layer, layer_off, r);
+        r
     }
 
     /// Read the first Layer the Reference points at.
@@ -855,50 +864,23 @@ impl<'data> M3File<'data> {
 
         // `color_bitmap` is always the second field: +4 (after id:u32).
         // Holds for ALL LAYR versions (v20..v26).
-        let bitmap_off = start + 4;
-        if bitmap_off + 12 > self.data.len() {
-            return None;
-        }
-
-        let entries = u32::from_le_bytes(self.data[bitmap_off..bitmap_off + 4].try_into().ok()?);
-        let index = u32::from_le_bytes(self.data[bitmap_off + 4..bitmap_off + 8].try_into().ok()?);
-        let flags = u32::from_le_bytes(self.data[bitmap_off + 8..bitmap_off + 12].try_into().ok()?);
-
-        debug!(
-            "LAYR v{} tag[{}] color_bitmap: entries={} index={} flags={:#x}",
-            version, tag_idx, entries, index, flags
-        );
-
-        Some(Reference {
-            entries,
-            index,
-            flags,
-        })
+        let r = self.pod_at::<Reference>(start + 4);
+        debug!("LAYR v{} tag[{}] color_bitmap: {:?}", version, tag_idx, r);
+        r
     }
 
-    /// Texture path for the named layer of material `mat_idx`.
-    pub fn texture_path_for_layer(&self, mat_idx: usize, layer: &str) -> Result<String> {
-        let layer_ref = match self.mat_layer_ref(mat_idx, layer) {
-            Some(r) => r,
-            None => return Ok(String::new()),
+    /// Texture path for the named layer of material `mat_idx`, or `""` when the
+    /// layer is absent, has no bitmap, or its name is unreadable.
+    pub fn texture_path_for_layer(&self, mat_idx: usize, layer: &str) -> String {
+        let Some(bitmap) = self
+            .mat_layer_ref(mat_idx, layer)
+            .and_then(|r| self.read_layer_bitmap_ref(&r))
+        else {
+            return String::new();
         };
-
-        let bitmap_ref = match self.read_layer_bitmap_ref(&layer_ref) {
-            Some(r) => r,
-            None => {
-                debug!("  -> layer '{}': no bitmap ref", layer);
-                return Ok(String::new());
-            }
-        };
-
-        if bitmap_ref.entries == 0 {
-            debug!("  -> layer '{}': bitmap.entries = 0", layer);
-            return Ok(String::new());
-        }
-
-        let s = self.read_char(&bitmap_ref).unwrap_or("");
+        let s = self.read_char(&bitmap).unwrap_or("");
         debug!("  -> texture path (layer '{}'): {:?}", layer, s);
-        Ok(s.to_owned())
+        s.to_owned()
     }
 
     /// Flat color of a material layer, as linear-ish RGBA in 0..1, when the
@@ -908,9 +890,10 @@ impl<'data> M3File<'data> {
     /// color lives in `color_value`, not a `.dds`. Returns `None` for ordinary
     /// bitmap/empty layers.
     ///
-    /// LAYR layout: id(4) + color_bitmap Ref(12) + color_value(20) + flags(4).
+    /// LAYR layout: id(4) + `color_bitmap` Ref(12) + `color_value(20)` + flags(4).
     /// `color_value` is a `ColorAnimationReferenceV0`: header(8) + default
     /// COL(b,g,r,a @ +24) + null COL(4) + unused(4); `flags` follows at +36.
+    #[must_use]
     pub fn layer_color(&self, mat_idx: usize, layer: &str) -> Option<[f32; 4]> {
         let layer_ref = self.mat_layer_ref(mat_idx, layer)?;
         let tag_idx = layer_ref.index as usize;
@@ -918,24 +901,18 @@ impl<'data> M3File<'data> {
             return None;
         }
         let start = self.tags[tag_idx].offset as usize;
-        if start + 40 > self.data.len() {
-            return None;
-        }
-        let rd = |o: usize| u32::from_le_bytes(self.data[start + o..start + o + 4].try_into().unwrap());
-        let flags = rd(36);
+        let flags: u32 = self.pod_at(start + 36)?;
         if flags & 0x400 == 0 {
             return None; // not a color layer
         }
-        let c = rd(24); // default COL: b,g,r,a (little-endian byte order)
-        let b = (c & 0xff) as f32 / 255.0;
-        let g = ((c >> 8) & 0xff) as f32 / 255.0;
-        let r = ((c >> 16) & 0xff) as f32 / 255.0;
-        let a = ((c >> 24) & 0xff) as f32 / 255.0;
-        Some([r, g, b, a])
+        // Default COL, stored b, g, r, a.
+        let [b, g, r, a]: [u8; 4] = self.pod_at(start + 24)?;
+        let unit = |c: u8| f32::from(c) / 255.0;
+        Some([unit(r), unit(g), unit(b), unit(a)])
     }
 
     /// Read `uv_tiling.default` from a Layer pointed at by the Reference.
-    /// Vec2AnimRef: header(8) + default_x(4) + default_y(4) + ...
+    /// `Vec2AnimRef`: header(8) + `default_x(4)` + `default_y(4)` + ...
     /// Returns `(tiling_x, tiling_y)`, defaulting to (1.0, 1.0).
     pub fn read_layer_uv_tiling(&self, r: &Reference) -> (f32, f32) {
         if r.entries == 0 {
@@ -953,21 +930,9 @@ impl<'data> M3File<'data> {
         let uv_tiling_off = layr_uv_tiling_offset(version);
 
         // Vec2AnimRef.default starts at +8 (after the header).
-        let default_off = start + uv_tiling_off + 8;
-        if default_off + 8 > self.data.len() {
+        let Some([tx, ty]) = self.pod_at::<[f32; 2]>(start + uv_tiling_off + 8) else {
             return (1.0, 1.0);
-        }
-
-        let tx = f32::from_le_bytes(
-            self.data[default_off..default_off + 4]
-                .try_into()
-                .unwrap_or([0, 0, 128, 63]),
-        );
-        let ty = f32::from_le_bytes(
-            self.data[default_off + 4..default_off + 8]
-                .try_into()
-                .unwrap_or([0, 0, 128, 63]),
-        );
+        };
 
         // tiling = 0 → treat as 1 (defensive against div-by-zero).
         let tx = if tx.abs() < 1e-6 { 1.0 } else { tx };
@@ -985,6 +950,10 @@ impl<'data> M3File<'data> {
     /// MODL.sequences (offset 16) → SEQS array. Supports versions v1 (96 bytes)
     /// and v2 (92 bytes); v1 carries an extra `unknown05: u32` field that we
     /// ignore on read.
+    ///
+    /// # Errors
+    ///
+    /// The `SEQS` reference is outside the tag table or its records do not fit in the file.
     pub fn sequences(&self) -> Result<Vec<Seqs>> {
         let r = match self.read_modl_ref(16) {
             Some(r) if r.entries > 0 => r,
@@ -1004,11 +973,11 @@ impl<'data> M3File<'data> {
         };
 
         let fits = self.data.len().saturating_sub(start) / file_elem_sz;
-        ensure!(count <= fits, "SEQS: {} records do not fit in the file", count);
+        ensure!(count <= fits, "SEQS: {count} records do not fit in the file");
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             let off = start + i * file_elem_sz;
-            ensure!(off + file_elem_sz <= self.data.len(), "SEQS[{}] out of bounds", i);
+            ensure!(off + file_elem_sz <= self.data.len(), "SEQS[{i}] out of bounds");
             let raw = &self.data[off..off + file_elem_sz];
             let mut buf = [0u8; std::mem::size_of::<Seqs>()];
             if version == 1 {
@@ -1025,7 +994,11 @@ impl<'data> M3File<'data> {
         Ok(out)
     }
 
-    /// MODL.sequence_transformation_groups (offset 40) → STG_ array.
+    /// `MODL.sequence_transformation_groups` (offset 40) → STG_ array.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn sequence_groups(&self) -> Result<Vec<Stg>> {
         match self.read_modl_ref(40) {
             Some(r) if r.entries > 0 => self.read_ref_slice::<Stg>(&r),
@@ -1033,7 +1006,11 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// MODL.sequence_transformation_collections (offset 28) → STC_ array.
+    /// `MODL.sequence_transformation_collections` (offset 28) → STC_ array.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn sequence_collections(&self) -> Result<Vec<Stc>> {
         match self.read_modl_ref(28) {
             Some(r) if r.entries > 0 => self.read_ref_slice::<Stc>(&r),
@@ -1041,73 +1018,121 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Read a Reference to a u32 array (anim_ids / anim_refs / stc_indices).
+    /// Read a Reference to a u32 array (`anim_ids` / `anim_refs` / `stc_indices`).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_u32(&self, r: &Reference) -> Result<Vec<u32>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<u32>(r)
     }
 
-    /// Read a Reference to an i32 array (frames in SDxx — millisecond timestamps).
+    /// Read a Reference to an i32 array (frames in `SDxx` — millisecond timestamps).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_i32(&self, r: &Reference) -> Result<Vec<i32>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<i32>(r)
     }
 
     /// Read a Reference to a VEC3 array (SD3V key values — translation/scale).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_vec3(&self, r: &Reference) -> Result<Vec<Vec3>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Vec3>(r)
     }
 
     /// Read a Reference to a QUAT array (SD4Q key values — rotation).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_quat(&self, r: &Reference) -> Result<Vec<Quat>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Quat>(r)
     }
 
     /// Read the SD3V block array referenced by `STC.sd3v`.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sd3v(&self, r: &Reference) -> Result<Vec<Sd3v>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd3v>(r)
     }
 
     /// SDS6 — `i16` keyframe blocks (`STC.sds6`).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sds6(&self, r: &Reference) -> Result<Vec<Sds6>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sds6>(r)
     }
 
     /// SDU6 — `u16` keyframe blocks (`STC.sdu6`).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sdu6(&self, r: &Reference) -> Result<Vec<Sdu6>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sdu6>(r)
     }
 
     /// `I16_` array via Reference — the key values of an SDS6 block.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_i16(&self, r: &Reference) -> Result<Vec<i16>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<i16>(r)
     }
 
     /// `U16_` array via Reference — the key values of an SDU6 block.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_u16(&self, r: &Reference) -> Result<Vec<u16>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<u16>(r)
     }
 
     /// SDR3 — float keyframe blocks (`STC.sdr3`).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sdr3(&self, r: &Reference) -> Result<Vec<Sdr3>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sdr3>(r)
     }
 
     /// REAL array via Reference — the key values of an SDR3 block.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_f32(&self, r: &Reference) -> Result<Vec<f32>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<f32>(r)
     }
 
     /// SD4Q — quaternion keyframe blocks (`STC.sd4q`).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sd4q(&self, r: &Reference) -> Result<Vec<Sd4q>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Sd4q>(r)
@@ -1117,6 +1142,7 @@ impl<'data> M3File<'data> {
 
     /// Index of the first tag named `tag_le` — the on-disk, byte-reversed
     /// spelling (`b"_VID"` for `DIV_`).
+    #[must_use]
     pub fn find_tag(&self, tag_le: &[u8; 4]) -> Option<usize> {
         self.tags.iter().position(|t| t.tag_bytes() == *tag_le)
     }
@@ -1134,6 +1160,7 @@ impl<'data> M3File<'data> {
     }
 
     /// Header variant the file was written with.
+    #[must_use]
     pub fn version(&self) -> M3Version {
         self.version
     }
@@ -1168,12 +1195,10 @@ impl<'data> M3File<'data> {
         );
         ensure!(
             byte_len.is_multiple_of(elem_sz),
-            "byte_len {} is not a multiple of elem_sz {}",
-            byte_len,
-            elem_sz
+            "byte_len {byte_len} is not a multiple of elem_sz {elem_sz}"
         );
 
-        Ok(self.copy_aligned(&self.data[start..end]))
+        Ok(Self::copy_aligned(&self.data[start..end]))
     }
 
     /// Read elements via Reference. `ref.entries` = element count, `ref.index` = tag index.
@@ -1215,10 +1240,14 @@ impl<'data> M3File<'data> {
             self.data.len()
         );
 
-        Ok(self.copy_aligned(&self.data[start..end]))
+        Ok(Self::copy_aligned(&self.data[start..end]))
     }
 
     /// CHAR string via Reference (count = bytes, same as a tag).
+    ///
+    /// # Errors
+    ///
+    /// The reference is outside the tag table or the file, or the string is not UTF-8.
     pub fn read_char(&self, r: &Reference) -> Result<&'data str> {
         if r.entries == 0 {
             return Ok("");
@@ -1237,10 +1266,16 @@ impl<'data> M3File<'data> {
         from_utf8(bytes).map_err(|e| anyhow::anyhow!("invalid UTF-8: {e}"))
     }
 
+    /// A `Pod` value at byte offset `at`, if it lies entirely inside the file.
+    fn pod_at<T: bytemuck::Pod>(&self, at: usize) -> Option<T> {
+        let end = at.checked_add(std::mem::size_of::<T>())?;
+        self.data.get(at..end).map(bytemuck::pod_read_unaligned)
+    }
+
     /// Copy bytes into a `Vec<T>`. The mmap gives no alignment guarantee for
     /// a tag's payload, so fall back to per-element unaligned reads when the
     /// slice cannot be reinterpreted in place.
-    fn copy_aligned<T: bytemuck::Pod>(&self, raw: &[u8]) -> Vec<T> {
+    fn copy_aligned<T: bytemuck::Pod>(raw: &[u8]) -> Vec<T> {
         match bytemuck::try_cast_slice::<u8, T>(raw) {
             Ok(slice) => slice.to_vec(),
             Err(_) => raw

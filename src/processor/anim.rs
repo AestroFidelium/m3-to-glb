@@ -9,7 +9,7 @@
 //! belong to a SEQS, which is enough for `(group, action) → STC name`.
 //!
 //! `STC.anim_refs[i]` is the packed `(anim_type << 16) | anim_index`:
-//!   `anim_type` indexes the SDxx array inside the STC (see m3studio
+//!   `anim_type` indexes the `SDxx` array inside the STC (see m3studio
 //!   io_m3_import.py:701-704); `anim_index` is the slot inside that array.
 //!
 //! Per-bone TRS lookup goes through `bone.location.header.id`,
@@ -29,14 +29,6 @@ use crate::m3::reader::M3File;
 use crate::m3::structures::{Bone, Sd3v, Sd4q};
 use anyhow::Result;
 use tracing::debug;
-
-/// Z-up → Y-up rotation (rotate -90° around X), applied to root bones.
-const ZY_QUAT: [f32; 4] = [
-    -std::f32::consts::FRAC_1_SQRT_2,
-    0.0,
-    0.0,
-    std::f32::consts::FRAC_1_SQRT_2,
-];
 
 /// The node property an animation channel drives.
 #[derive(Debug, Clone, Copy)]
@@ -132,10 +124,10 @@ pub(crate) fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
         // Compared as the f32 that is written: two distinct i32 milliseconds
         // past ~4.6 hours round to the same f32.
         let t = ms as f32 / 1000.0;
-        match times.last() {
-            Some(&prev) if t < prev => {}
+        match times.last().map(|prev| t.total_cmp(prev)) {
+            Some(std::cmp::Ordering::Less) => {}
             // m3studio keeps the *last* sample sharing the same frame.
-            Some(&prev) if t == prev => {
+            Some(std::cmp::Ordering::Equal) => {
                 if let Some(last) = keep.last_mut() {
                     *last = i;
                 }
@@ -149,39 +141,18 @@ pub(crate) fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
     (times, keep)
 }
 
-#[inline]
-fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
-    let (ax, ay, az, aw) = (a[0], a[1], a[2], a[3]);
-    let (bx, by, bz, bw) = (b[0], b[1], b[2], b[3]);
-    [
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    ]
-}
-
-#[inline]
-fn rotate_vec_by_quat(v: [f32; 3], q: [f32; 4]) -> [f32; 3] {
-    let (qx, qy, qz, qw) = (q[0], q[1], q[2], q[3]);
-    let tx = 2.0 * (qy * v[2] - qz * v[1]);
-    let ty = 2.0 * (qz * v[0] - qx * v[2]);
-    let tz = 2.0 * (qx * v[1] - qy * v[0]);
-    [
-        v[0] + qw * tx + (qy * tz - qz * ty),
-        v[1] + qw * ty + (qz * tx - qx * tz),
-        v[2] + qw * tz + (qx * ty - qy * tx),
-    ]
-}
-
 /// Main entry point. Parses SEQS/STG/STC out of every source and produces
 /// the list of glTF-compatible animations.
 ///
 /// `base` — main `.m3` file; bones and their `anim_id`s come from here.
 /// `anim_sources` — every file (including `base` if it has its own SEQS,
-/// and/or external `.m3a` files) that contributes SEQS/STG/STC and SDxx data.
+/// and/or external `.m3a` files) that contributes SEQS/STG/STC and `SDxx` data.
 /// `bone_node_base` — node index of the first bone in glTF nodes (= 0 in
 /// the current glb/mod.rs layout).
+///
+/// # Errors
+///
+/// The base model's bone table cannot be read.
 pub fn build_animations(
     base:           &M3File<'_>,
     anim_sources:   &[&M3File<'_>],
@@ -225,7 +196,7 @@ pub fn build_animations(
 
                 if let Some(anim) = build_one_animation(
                     src, &stcs[stc_idx], &bones, &group_name, bone_node_base,
-                )? {
+                ) {
                     anims.push(anim);
                 }
             }
@@ -234,7 +205,7 @@ pub fn build_animations(
         // STCs not bound to any STG.
         for (stc_idx, stc) in stcs.iter().enumerate() {
             if emitted[stc_idx] { continue; }
-            if let Some(anim) = build_one_animation(src, stc, &bones, "", bone_node_base)? {
+            if let Some(anim) = build_one_animation(src, stc, &bones, "", bone_node_base) {
                 anims.push(anim);
             }
         }
@@ -249,11 +220,11 @@ fn build_one_animation(
     bones:          &[Bone],
     group_name:     &str,
     bone_node_base: usize,
-) -> Result<Option<Animation>> {
+) -> Option<Animation> {
     let stc_name = m3.read_char(&stc.name).unwrap_or("").to_owned();
     if stc_name.is_empty() {
         debug!("STC: empty name, skipping");
-        return Ok(None);
+        return None;
     }
 
     // m3studio computes `name.replace(group_name, '')[1:]` to derive a clean
@@ -265,14 +236,14 @@ fn build_one_animation(
     let anim_ids = m3.read_ref_u32(&stc.anim_ids).unwrap_or_default();
     let anim_refs = m3.read_ref_u32(&stc.anim_refs).unwrap_or_default();
     if anim_ids.is_empty() || anim_refs.is_empty() {
-        return Ok(None);
+        return None;
     }
     if anim_ids.len() != anim_refs.len() {
         debug!(
             "STC '{}': anim_ids({}) != anim_refs({}); skipping",
             anim_name, anim_ids.len(), anim_refs.len()
         );
-        return Ok(None);
+        return None;
     }
 
     let lookup = StcLookup::build(&anim_ids, &anim_refs);
@@ -322,7 +293,7 @@ fn build_one_animation(
             "STC '{}': empty channels (no bone anim_id matched STC.anim_ids)",
             anim_name
         );
-        return Ok(None);
+        return None;
     }
 
     debug!(
@@ -330,7 +301,7 @@ fn build_one_animation(
         anim_name, samplers.len(), channels.len()
     );
 
-    Ok(Some(Animation { name: anim_name, samplers, channels }))
+    Some(Animation { name: anim_name, samplers, channels })
 }
 
 fn build_vec3_sampler(m3: &M3File<'_>, block: &Sd3v, apply_zy: bool) -> Option<Sampler> {
@@ -352,7 +323,7 @@ fn build_vec3_sampler(m3: &M3File<'_>, block: &Sd3v, apply_zy: bool) -> Option<S
     for &i in &keep {
         let v = values[i];
         let arr = if apply_zy {
-            rotate_vec_by_quat([v.x, v.y, v.z], ZY_QUAT)
+            crate::quat::rotate([v.x, v.y, v.z], crate::quat::Z_UP_TO_Y_UP)
         } else {
             [v.x, v.y, v.z]
         };
@@ -381,7 +352,7 @@ fn build_quat_sampler(m3: &M3File<'_>, block: &Sd4q, apply_zy: bool) -> Option<S
     for &i in &keep {
         let q = values[i];
         let raw = if apply_zy {
-            quat_mul(ZY_QUAT, [q.x, q.y, q.z, q.w])
+            crate::quat::mul(crate::quat::Z_UP_TO_Y_UP, [q.x, q.y, q.z, q.w])
         } else {
             [q.x, q.y, q.z, q.w]
         };

@@ -1,4 +1,4 @@
-//! Geometry engine: M3 AoS → SoA conversion plus SIMD transforms.
+//! Geometry engine: M3 `AoS` → `SoA` conversion plus SIMD transforms.
 
 pub mod anim;
 mod soa;
@@ -12,7 +12,11 @@ use anyhow::Result;
 use rayon::prelude::*;
 use tracing::debug;
 
-/// Convert every M3 mesh into SoA form, in parallel via rayon.
+/// Convert every M3 mesh into `SoA` form, in parallel via rayon.
+///
+/// # Errors
+///
+/// The division, region or index tables cannot be read, or a region's vertices lie outside the vertex buffer.
 pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
     // A model with no geometry at all is ordinary, not broken: most ability
     // effects are a skeleton plus particle emitters, carrying neither a vertex
@@ -87,7 +91,7 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 
 /// Component offsets inside a vertex.
 /// Derived from `vertex_flags` in MODL, following m3studio
-/// io_m3.py:144 `get_vertex_description`.
+/// `io_m3.py:144` `get_vertex_description`.
 #[derive(Debug, Clone)]
 pub struct VertexOffsets {
     /// Compressed normal + bitangent sign byte (`0x800000`).
@@ -115,7 +119,7 @@ pub struct SkinLayout {
 
 impl VertexOffsets {
     /// Compute component offsets from `vertex_flags`, mirroring m3studio
-    /// (io_m3.py:144 `get_vertex_description`).
+    /// (`io_m3.py:144` `get_vertex_description`).
     ///
     /// Layout (typical flags=0x01860261, stride=40):
     ///
@@ -133,6 +137,7 @@ impl VertexOffsets {
     ///   ...: normal_v3 / tangent_v3 [f32;3]       12B each (0x200000/0x400000)
     ///   ...: tangent  [u8;4]                       4B  (0x1000000)
     /// ```
+    #[must_use]
     pub fn from_flags(flags: u32) -> Self {
         let mut off: usize = 12; // pos always (0x1)
 
@@ -151,39 +156,39 @@ impl VertexOffsets {
             None
         };
 
-        if flags & 0x000080 != 0 { off += 12; }  // normalf (uncompressed normal)
+        if flags & 0x0000_0080 != 0 { off += 12; }  // normalf (uncompressed normal)
 
         // Compressed normal (Vector3As3uint8 + sign byte) — RIGHT AFTER skin/normalf,
         // BEFORE color and UVs (m3studio io_m3.py:172-175).
-        let normal = if flags & 0x800000 != 0 {
+        let normal = if flags & 0x0080_0000 != 0 {
             let o = off; off += 4; Some(o)
         } else { None };
 
-        if flags & 0x000100 != 0 { off += 4; }   // test100 (before col)
-        if flags & 0x000200 != 0 { off += 4; }   // col
-        if flags & 0x000400 != 0 { off += 4; }   // test400
-        if flags & 0x000800 != 0 { off += 4; }   // test800
-        if flags & 0x001000 != 0 { off += 4; }   // test1000
-        if flags & 0x002000 != 0 { off += 8; }   // fuv0 (Vec2 float)
-        if flags & 0x004000 != 0 { off += 8; }   // fuv1
-        if flags & 0x008000 != 0 { off += 8; }   // fuv2
-        if flags & 0x010000 != 0 { off += 8; }   // fuv3
+        if flags & 0x0000_0100 != 0 { off += 4; }   // test100 (before col)
+        if flags & 0x0000_0200 != 0 { off += 4; }   // col
+        if flags & 0x0000_0400 != 0 { off += 4; }   // test400
+        if flags & 0x0000_0800 != 0 { off += 4; }   // test800
+        if flags & 0x0000_1000 != 0 { off += 4; }   // test1000
+        if flags & 0x0000_2000 != 0 { off += 8; }   // fuv0 (Vec2 float)
+        if flags & 0x0000_4000 != 0 { off += 8; }   // fuv1
+        if flags & 0x0000_8000 != 0 { off += 8; }   // fuv2
+        if flags & 0x0001_0000 != 0 { off += 8; }   // fuv3
 
         // Compressed UVs (Vector2As2int16 — 4 bytes each).
-        let uv0 = if flags & 0x020000 != 0 {
+        let uv0 = if flags & 0x0002_0000 != 0 {
             let o = off; off += 4; Some(o)
         } else { None };
-        let uv1 = if flags & 0x040000 != 0 {
+        let uv1 = if flags & 0x0004_0000 != 0 {
             let o = off; off += 4; Some(o)
         } else { None };
-        if flags & 0x080000 != 0 { off += 4; }   // uv2
-        if flags & 0x100000 != 0 { off += 4; }   // uv3
+        if flags & 0x0008_0000 != 0 { off += 4; }   // uv2
+        if flags & 0x0010_0000 != 0 { off += 4; }   // uv3
 
-        if flags & 0x200000 != 0 { off += 12; }  // normalf2 (uncompressed normal #2)
-        if flags & 0x400000 != 0 { off += 12; }  // tanf (uncompressed tangent)
+        if flags & 0x0020_0000 != 0 { off += 12; }  // normalf2 (uncompressed normal #2)
+        if flags & 0x0040_0000 != 0 { off += 12; }  // tanf (uncompressed tangent)
 
         // Compressed tangent (Vector3As3uint8 + unused byte).
-        let tangent = if flags & 0x1000000 != 0 {
+        let tangent = if flags & 0x0100_0000 != 0 {
             Some(off)
         } else { None };
 
@@ -371,9 +376,12 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
         let ni = region.face_count as usize;
         let index_start = soa.indices.len();
         if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
-            let base = soa.base_vertex_for_region() as u32;
+            let base = u32::try_from(soa.base_vertex_for_region())
+                .map_err(|_| anyhow::anyhow!("mesh exceeds u32::MAX vertices"))?;
             let abs_to_local: u32 = if regn_version <= 2 { region.first_vertex_index } else { 0 };
-            let local = |i: u16| u32::from(i).checked_sub(abs_to_local).filter(|&l| l < count as u32);
+            let local = |i: u16| {
+                u32::from(i).checked_sub(abs_to_local).filter(|&l| l < region.vertex_count)
+            };
             for tri in faces.chunks_exact(3) {
                 if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
                     soa.indices.extend([a + base, b + base, c + base]);

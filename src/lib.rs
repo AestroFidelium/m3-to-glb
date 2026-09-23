@@ -1,4 +1,4 @@
-//! Convert Blizzard **M3** models — StarCraft II and Heroes of the Storm — into
+//! Convert Blizzard **M3** models — `StarCraft` II and Heroes of the Storm — into
 //! **glTF 2.0 binary** (`.glb`).
 //!
 //! M3 is an undocumented, versioned, tag-indexed binary format. This crate reads
@@ -38,7 +38,7 @@
 //! | stage | module | |
 //! |---|---|---|
 //! | parse | [`m3`] | tag table, version-dependent struct layouts |
-//! | geometry | [`processor`] | dynamic vertex layout → SoA, SIMD decode, rayon per division |
+//! | geometry | [`processor`] | dynamic vertex layout → `SoA`, SIMD decode, rayon per division |
 //! | animation | [`processor::anim`] | `SEQS`/`STG_`/`STC_` → glTF samplers |
 //! | effects | [`fx`], [`attach`] | `PAR_`/`LITE`/`PROJ`/`ATT_` → node `extras` |
 //! | textures | [`assets`] | directory index keyed by xxh3 of the file stem |
@@ -134,7 +134,7 @@ pub struct Stats {
     pub triangles:  usize,
     /// Bones in the skeleton.
     pub bones:      usize,
-    /// Textures available in the index that was used.
+    /// Textures embedded in the GLB.
     pub textures:   usize,
     /// Animation clips the model and its companion files declare.
     pub animations: usize,
@@ -222,7 +222,7 @@ impl<'a> Converter<'a> {
         let textures = self.textures.unwrap_or(&empty);
 
         let meshes = processor::convert_all_meshes(&m3).map_err(Error::Convert)?;
-        let bytes = glb::pack(&meshes, textures, &m3, &anim_refs, &self.options)
+        let (bytes, embedded) = glb::pack_counted(&meshes, textures, &m3, &anim_refs, self.options)
             .map_err(Error::Convert)?;
 
         let animations = std::iter::once(&m3)
@@ -233,7 +233,7 @@ impl<'a> Converter<'a> {
             meshes:    meshes.len(),
             triangles: meshes.iter().map(processor::MeshDataSoA::triangle_count).sum(),
             bones:     m3.bone_count(),
-            textures:  textures.len(),
+            textures:  embedded,
             animations,
         };
         Ok(Glb { bytes, stats })

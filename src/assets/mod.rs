@@ -35,6 +35,7 @@ impl std::fmt::Debug for TextureCache {
 
 impl TextureCache {
     /// Empty cache (no texture directory provided).
+    #[must_use]
     pub fn empty() -> Self {
         Self {
             map: AHashMap::new(),
@@ -45,12 +46,16 @@ impl TextureCache {
     /// Index every texture under `dir`, recursively.
     ///
     /// Hashing is parallelised via rayon for large texture directories.
+    ///
+    /// # Errors
+    ///
+    /// `dir` is not a directory, or a directory under it cannot be read.
     pub fn build(dir: &str) -> Result<Self> {
         use rayon::prelude::*;
 
         let base_path = Path::new(dir);
         if !base_path.is_dir() {
-            anyhow::bail!("texture directory not found: {}", dir);
+            anyhow::bail!("texture directory not found: {dir}");
         }
 
         // Collect every file recursively (single-threaded fs walk).
@@ -88,6 +93,7 @@ impl TextureCache {
 
     /// Look up a texture by an M3 path.
     /// Normalises the path, then queries by xxh3 of the stem.
+    #[must_use]
     pub fn find(&self, m3_path: &str) -> Option<&PathBuf> {
         let normalized = self.normalize_m3_path(m3_path);
 
@@ -102,16 +108,19 @@ impl TextureCache {
     }
 
     /// Number of indexed textures.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
     /// Whether no texture was indexed (always true for [`Self::empty`]).
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
 
     /// Look up a texture by M3 path, also returning its MIME type.
+    #[must_use]
     pub fn find_with_mime(&self, m3_path: &str) -> Option<(&PathBuf, &'static str)> {
         let normalized = self.normalize_m3_path(m3_path);
         let stem = Path::new(normalized.as_ref())

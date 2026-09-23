@@ -1,19 +1,35 @@
 //! glTF 2.0 JSON manifest builder.
 //!
 //! Deliberately serde-free — plain string concatenation for speed and zero
-//! dependencies. The JSON is minimal but valid per the glTF 2.0 spec.
+//! dependencies. Every string goes through [`json::string`] and every float
+//! through [`json::num`], so names and values taken from the file cannot break
+//! the JSON.
 
 use crate::json;
-use std::fmt::Write as FmtWrite;
+use std::fmt::Write as _;
 
 // ─── Intermediate data structures ────────────────────────────────────────────
+
+/// `componentType` values.
+pub const UNSIGNED_BYTE: u32 = 5121;
+/// `componentType` values.
+pub const UNSIGNED_SHORT: u32 = 5123;
+/// `componentType` values.
+pub const UNSIGNED_INT: u32 = 5125;
+/// `componentType` values.
+pub const FLOAT: u32 = 5126;
+/// `bufferView.target` for vertex attributes.
+pub const ARRAY_BUFFER: u32 = 34962;
+/// `bufferView.target` for index data.
+pub const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 
 pub struct Accessor {
     pub buffer_view:    usize,
     pub byte_offset:    usize,
-    pub component_type: u32,    // 5121=UBYTE, 5123=USHORT, 5125=UINT, 5126=FLOAT
+    pub component_type: u32,
     pub count:          usize,
-    pub accessor_type:  String, // "VEC2"/"VEC3"/"VEC4"/"SCALAR"/"MAT4"
+    /// `"SCALAR"`, `"VEC2"`, `"VEC3"`, `"VEC4"` or `"MAT4"`.
+    pub element_type:   &'static str,
     pub normalized:     bool,
     pub min:            Option<Vec<f64>>,
     pub max:            Option<Vec<f64>>,
@@ -22,7 +38,7 @@ pub struct Accessor {
 pub struct BufferView {
     pub offset: usize,
     pub length: usize,
-    pub target: Option<u32>, // 34962=ARRAY_BUFFER, 34963=ELEMENT_ARRAY_BUFFER
+    pub target: Option<u32>,
 }
 
 pub struct Primitive {
@@ -54,7 +70,7 @@ pub struct GltfMaterial {
     pub metallic_factor:    f32,
     pub roughness_factor:   f32,
     pub emissive_factor:    [f32; 3],
-    pub alpha_mode:         Option<String>, // "OPAQUE", "MASK", "BLEND"
+    pub alpha_mode:         Option<&'static str>, // "MASK" or "BLEND"; None = OPAQUE
     pub alpha_cutoff:       f32,
     pub double_sided:       bool,
 }
@@ -65,6 +81,7 @@ pub struct GltfMesh {
 }
 
 /// glTF scene node — may be a bone, a mesh, or just a grouping node.
+#[derive(Default)]
 pub struct GltfNode {
     pub name:        Option<String>,
     pub translation: Option<[f32; 3]>,
@@ -102,304 +119,43 @@ pub struct GltfAnimation {
     pub channels: Vec<GltfAnimChannel>,
 }
 
+/// Everything the manifest describes.
+#[derive(Default)]
+pub struct Document<'a> {
+    pub meshes:       &'a [GltfMesh],
+    pub accessors:    &'a [Accessor],
+    pub buffer_views: &'a [BufferView],
+    pub bin_length:   usize,
+    pub images:       &'a [GltfImage],
+    pub materials:    &'a [GltfMaterial],
+    pub nodes:        &'a [GltfNode],
+    pub skins:        &'a [GltfSkin],
+    pub scene_roots:  &'a [usize],
+    pub animations:   &'a [GltfAnimation],
+    /// Wire KTX2 images through the standard `texture.source` field with
+    /// `mimeType: "image/ktx2"` and do NOT declare `KHR_texture_basisu`. This is
+    /// non-canonical glTF — only Bevy 0.17 accepts it (it dispatches images by
+    /// MIME type via `bevy_image`, but only when the extension is absent).
+    pub bevy_compat:  bool,
+}
+
 // ─── JSON builder ────────────────────────────────────────────────────────────
 
-/// Build the full glTF JSON manifest.
-///
-/// `bevy_compat`: when true, KTX2 images are wired through the standard
-/// `texture.source` field with `mimeType: "image/ktx2"`, and the
-/// `KHR_texture_basisu` extension is NOT declared. This is non-canonical
-/// glTF — only Bevy 0.17 accepts it (it dispatches images by MIME type via
-/// `bevy_image`, but only when the extension is absent). Every other
-/// loader / validator will reject the file. When false, the canonical
-/// `KHR_texture_basisu` extension form is emitted.
-#[allow(clippy::too_many_arguments)]
-pub fn build_json(
-    meshes:       &[GltfMesh],
-    accessors:    &[Accessor],
-    buffer_views: &[BufferView],
-    bin_length:   usize,
-    images:       &[GltfImage],
-    materials:    &[GltfMaterial],
-    nodes:        &[GltfNode],
-    skins:        &[GltfSkin],
-    scene_roots:  &[usize],
-    animations:   &[GltfAnimation],
-    bevy_compat:  bool,
-) -> String {
+/// Build the full glTF JSON manifest. Every section appends itself followed by
+/// a comma, and glTF forbids empty arrays, so empty sections append nothing.
+pub fn build_json(doc: &Document<'_>) -> String {
     let mut j = String::with_capacity(8192);
-
     j.push('{');
     j.push_str(r#""asset":{"version":"2.0","generator":"m3-to-glb"},"#);
-
-    // ── glTF extensions ──────────────────────────────────────────────────────
-    // KHR_texture_basisu is required whenever any image is KTX2 — engines
-    // that don't support the extension cannot read these textures, so we
-    // also list it under `extensionsRequired`. In bevy_compat mode we
-    // deliberately omit the declaration so Bevy 0.17 falls through to its
-    // MIME-based `bevy_image` decoder.
-    let uses_basisu = images.iter().any(|img| img.mime_type == "image/ktx2");
-    if uses_basisu && !bevy_compat {
-        j.push_str(r#""extensionsUsed":["KHR_texture_basisu"],"#);
-        j.push_str(r#""extensionsRequired":["KHR_texture_basisu"],"#);
-    }
-
-    // ── scene & nodes ─────────────────────────────────────────────────────────
-    // A model with nothing to show (every region hidden, no skeleton) declares
-    // no scene at all. glTF forbids empty `nodes` arrays, and the `gltf` crate
-    // (Bevy's loader) rejects a scene object without one — omitting `scenes` is
-    // the only form both accept.
-    if !scene_roots.is_empty() {
-        j.push_str(r#""scene":0,"scenes":[{"nodes":["#);
-        for (i, root) in scene_roots.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            write!(j, "{}", root).unwrap();
-        }
-        j.push_str("]}],");
-    }
-
-    // ── nodes ─────────────────────────────────────────────────────────────────
-    if !nodes.is_empty() {
-        j.push_str(r#""nodes":["#);
-        for (i, n) in nodes.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            write_node(&mut j, n);
-        }
-        j.push_str("],");
-    }
-
-    // ── skins ─────────────────────────────────────────────────────────────────
-    if !skins.is_empty() {
-        j.push_str(r#""skins":["#);
-        for (i, s) in skins.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            j.push('{');
-            j.push_str(r#""joints":["#);
-            for (k, jt) in s.joints.iter().enumerate() {
-                if k > 0 { j.push(','); }
-                write!(j, "{}", jt).unwrap();
-            }
-            j.push(']');
-            if let Some(ibm) = s.inverse_bind_matrices {
-                write!(j, r#","inverseBindMatrices":{}"#, ibm).unwrap();
-            }
-            j.push('}');
-        }
-        j.push_str("],");
-    }
-
-    // ── meshes ────────────────────────────────────────────────────────────────
-    if !meshes.is_empty() {
-        j.push_str(r#""meshes":["#);
-        for (i, mesh) in meshes.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            write!(j, r#"{{"name":{},"primitives":["#, json::string(&mesh.name)).unwrap();
-            for (pi, prim) in mesh.primitives.iter().enumerate() {
-                if pi > 0 { j.push(','); }
-                j.push('{');
-                write!(
-                    j,
-                    r#""attributes":{{"POSITION":{},"NORMAL":{}"#,
-                    prim.position_accessor,
-                    prim.normal_accessor,
-                ).unwrap();
-                if let Some(t_acc) = prim.tangent_accessor {
-                    write!(j, r#","TANGENT":{}"#, t_acc).unwrap();
-                }
-                if let Some(uv_acc) = prim.texcoord_accessor {
-                    write!(j, r#","TEXCOORD_0":{}"#, uv_acc).unwrap();
-                }
-                if let Some(j_acc) = prim.joints_accessor {
-                    write!(j, r#","JOINTS_0":{}"#, j_acc).unwrap();
-                }
-                if let Some(w_acc) = prim.weights_accessor {
-                    write!(j, r#","WEIGHTS_0":{}"#, w_acc).unwrap();
-                }
-                j.push('}');
-                write!(j, r#","indices":{}"#, prim.indices_accessor).unwrap();
-                if let Some(mat) = prim.material {
-                    write!(j, r#","material":{}"#, mat).unwrap();
-                }
-                j.push_str(r#","mode":4"#);
-                j.push('}');
-            }
-            j.push_str("]}");
-        }
-        j.push_str("],");
-    }
-
-    // ── materials ─────────────────────────────────────────────────────────────
-    if !materials.is_empty() {
-        j.push_str(r#""materials":["#);
-        for (i, mat) in materials.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            j.push('{');
-            write!(j, r#""name":{},"#, json::string(&mat.name)).unwrap();
-            j.push_str(r#""pbrMetallicRoughness":{"#);
-            write!(j, r#""metallicFactor":{},"roughnessFactor":{}"#,
-                format_f32(mat.metallic_factor), format_f32(mat.roughness_factor)).unwrap();
-            if let Some(tex_idx) = mat.base_color_texture {
-                write!(j, r#","baseColorTexture":{{"index":{}}}"#, tex_idx).unwrap();
-            }
-            if mat.base_color_factor != [1.0, 1.0, 1.0, 1.0] {
-                let f = mat.base_color_factor;
-                write!(j, r#","baseColorFactor":[{},{},{},{}]"#,
-                    format_f32(f[0]), format_f32(f[1]), format_f32(f[2]), format_f32(f[3])).unwrap();
-            }
-            j.push('}');
-            if let Some(tex_idx) = mat.normal_texture {
-                write!(j, r#","normalTexture":{{"index":{}}}"#, tex_idx).unwrap();
-            }
-            if let Some(tex_idx) = mat.occlusion_texture {
-                write!(j, r#","occlusionTexture":{{"index":{}}}"#, tex_idx).unwrap();
-            }
-            if let Some(tex_idx) = mat.emissive_texture {
-                write!(j, r#","emissiveTexture":{{"index":{}}}"#, tex_idx).unwrap();
-            }
-            if mat.emissive_factor != [0.0, 0.0, 0.0] {
-                write!(j, r#","emissiveFactor":[{},{},{}]"#,
-                    format_f32(mat.emissive_factor[0]),
-                    format_f32(mat.emissive_factor[1]),
-                    format_f32(mat.emissive_factor[2])).unwrap();
-            }
-            if let Some(ref mode) = mat.alpha_mode {
-                write!(j, r#","alphaMode":{}"#, json::string(mode)).unwrap();
-                if mode == "MASK" {
-                    write!(j, r#","alphaCutoff":{}"#, format_f32(mat.alpha_cutoff)).unwrap();
-                }
-            }
-            if mat.double_sided {
-                j.push_str(r#","doubleSided":true"#);
-            }
-            j.push('}');
-        }
-        j.push_str("],");
-    }
-
-    // ── textures ──────────────────────────────────────────────────────────────
-    if !images.is_empty() {
-        j.push_str(r#""samplers":[{"magFilter":9729,"minFilter":9986,"wrapS":10497,"wrapT":10497}],"#);
-        j.push_str(r#""textures":["#);
-        for (i, img) in images.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            if img.mime_type == "image/ktx2" && !bevy_compat {
-                // KHR_texture_basisu form: the `source` lives inside the
-                // extension. Top-level `source` is omitted.
-                write!(
-                    j,
-                    r#"{{"sampler":0,"extensions":{{"KHR_texture_basisu":{{"source":{}}}}}}}"#,
-                    i
-                ).unwrap();
-            } else {
-                // Canonical PNG/JPEG path AND the bevy_compat KTX2 path:
-                // standard top-level `source`. Bevy's loader picks the
-                // decoder via `image.mimeType`.
-                write!(j, r#"{{"sampler":0,"source":{}}}"#, i).unwrap();
-            }
-        }
-        j.push_str("],");
-        j.push_str(r#""images":["#);
-        for (i, img) in images.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            write!(j, r#"{{"bufferView":{},"mimeType":{}}}"#, img.buffer_view, json::string(&img.mime_type)).unwrap();
-        }
-        j.push_str("],");
-    }
-
-    // ── animations ────────────────────────────────────────────────────────────
-    if !animations.is_empty() {
-        j.push_str(r#""animations":["#);
-        for (i, anim) in animations.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            j.push('{');
-            write!(j, r#""name":{},"samplers":["#, json::string(&anim.name)).unwrap();
-            for (si, samp) in anim.samplers.iter().enumerate() {
-                if si > 0 { j.push(','); }
-                write!(
-                    j,
-                    r#"{{"input":{},"output":{},"interpolation":"{}"}}"#,
-                    samp.input, samp.output, samp.interpolation,
-                ).unwrap();
-            }
-            j.push_str(r#"],"channels":["#);
-            for (ci, ch) in anim.channels.iter().enumerate() {
-                if ci > 0 { j.push(','); }
-                write!(
-                    j,
-                    r#"{{"sampler":{},"target":{{"node":{},"path":"{}"}}}}"#,
-                    ch.sampler, ch.target_node, ch.path,
-                ).unwrap();
-            }
-            j.push(']');
-            j.push('}');
-        }
-        j.push_str("],");
-    }
-
-    // ── accessors ─────────────────────────────────────────────────────────────
-    // Every array below is omitted when empty: glTF forbids a zero-length
-    // `accessors` / `bufferViews`, and an effect-only model reaches here with
-    // nothing but nodes.
-    if !accessors.is_empty() {
-    j.push_str(r#""accessors":["#);
-    for (i, acc) in accessors.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        j.push('{');
-        write!(
-            j,
-            r#""bufferView":{},"componentType":{},"count":{},"type":"{}""#,
-            acc.buffer_view, acc.component_type, acc.count, acc.accessor_type,
-        ).unwrap();
-        if acc.byte_offset > 0 {
-            write!(j, r#","byteOffset":{}"#, acc.byte_offset).unwrap();
-        }
-        if acc.normalized {
-            j.push_str(r#","normalized":true"#);
-        }
-        if let Some(ref mn) = acc.min {
-            j.push_str(r#","min":["#);
-            for (k, v) in mn.iter().enumerate() {
-                if k > 0 { j.push(','); }
-                write!(j, "{}", format_f64(*v)).unwrap();
-            }
-            j.push(']');
-        }
-        if let Some(ref mx) = acc.max {
-            j.push_str(r#","max":["#);
-            for (k, v) in mx.iter().enumerate() {
-                if k > 0 { j.push(','); }
-                write!(j, "{}", format_f64(*v)).unwrap();
-            }
-            j.push(']');
-        }
-        j.push('}');
-    }
-    j.push_str("],");
-    }
-
-    // ── bufferViews ───────────────────────────────────────────────────────────
-    if !buffer_views.is_empty() {
-        j.push_str(r#""bufferViews":["#);
-        for (i, bv) in buffer_views.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            j.push('{');
-            write!(j, r#""buffer":0,"byteOffset":{},"byteLength":{}"#, bv.offset, bv.length).unwrap();
-            if let Some(target) = bv.target {
-                write!(j, r#","target":{}"#, target).unwrap();
-            }
-            j.push('}');
-        }
-        j.push_str("],");
-    }
-
-    // ── buffers ───────────────────────────────────────────────────────────────
-    // A buffer must be at least one byte long, so a model whose BIN chunk is
-    // empty declares no buffer at all rather than a zero-length one.
-    if bin_length > 0 {
-        write!(j, r#""buffers":[{{"byteLength":{}}}],"#, bin_length).unwrap();
-    }
-
-    // Every section above ends with its own comma; drop the last one.
+    write_extensions(&mut j, doc);
+    write_scene(&mut j, doc.scene_roots, doc.nodes);
+    write_skins(&mut j, doc.skins);
+    write_meshes(&mut j, doc.meshes);
+    write_materials(&mut j, doc.materials);
+    write_textures(&mut j, doc.images, doc.bevy_compat);
+    write_animations(&mut j, doc.animations);
+    write_accessors(&mut j, doc.accessors);
+    write_buffers(&mut j, doc.buffer_views, doc.bin_length);
     if j.ends_with(',') {
         j.pop();
     }
@@ -407,88 +163,284 @@ pub fn build_json(
     j
 }
 
-fn write_node(j: &mut String, n: &GltfNode) {
-    j.push('{');
-    let mut first = true;
-    let mut sep = |j: &mut String| {
-        if !std::mem::take(&mut first) { j.push(','); }
-    };
+/// Comma-separated `items`, each written by `f`, inside `open` … `close`.
+fn list<T>(j: &mut String, open: &str, items: &[T], close: &str, mut f: impl FnMut(&mut String, &T)) {
+    j.push_str(open);
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            j.push(',');
+        }
+        f(j, item);
+    }
+    j.push_str(close);
+}
 
+fn nums(j: &mut String, vs: &[f32]) {
+    list(j, "[", vs, "]", |j, v| j.push_str(&json::num(*v)));
+}
+
+/// `KHR_texture_basisu` is required whenever any image is KTX2 — engines that
+/// don't support the extension cannot read these textures. In `bevy_compat`
+/// mode the declaration is deliberately left out.
+fn write_extensions(j: &mut String, doc: &Document<'_>) {
+    let uses_basisu = doc.images.iter().any(|img| img.mime_type == "image/ktx2");
+    if uses_basisu && !doc.bevy_compat {
+        j.push_str(r#""extensionsUsed":["KHR_texture_basisu"],"#);
+        j.push_str(r#""extensionsRequired":["KHR_texture_basisu"],"#);
+    }
+}
+
+/// A model with nothing to show (every region hidden, no skeleton) declares no
+/// scene at all: glTF forbids empty `nodes` arrays, and the `gltf` crate
+/// (Bevy's loader) rejects a scene object without one.
+fn write_scene(j: &mut String, roots: &[usize], nodes: &[GltfNode]) {
+    if !roots.is_empty() {
+        list(j, r#""scene":0,"scenes":[{"nodes":["#, roots, "]}],", |j, r| {
+            let _ = write!(j, "{r}");
+        });
+    }
+    if !nodes.is_empty() {
+        list(j, r#""nodes":["#, nodes, "],", write_node);
+    }
+}
+
+fn write_node(j: &mut String, n: &GltfNode) {
+    let mut o = json::Obj::new();
     if let Some(ref name) = n.name {
-        sep(j);
-        write!(j, r#""name":{}"#, json::string(name)).unwrap();
+        o.string("name", name);
     }
     if let Some(t) = n.translation {
-        sep(j);
-        write!(j, r#""translation":[{},{},{}]"#,
-            format_f32(t[0]), format_f32(t[1]), format_f32(t[2])).unwrap();
+        o.vec3("translation", t);
     }
     if let Some(r) = n.rotation {
-        sep(j);
-        write!(j, r#""rotation":[{},{},{},{}]"#,
-            format_f32(r[0]), format_f32(r[1]), format_f32(r[2]), format_f32(r[3])).unwrap();
+        o.vec4("rotation", r);
     }
     if let Some(s) = n.scale {
-        sep(j);
-        write!(j, r#""scale":[{},{},{}]"#,
-            format_f32(s[0]), format_f32(s[1]), format_f32(s[2])).unwrap();
+        o.vec3("scale", s);
     }
     if let Some(m) = n.mesh {
-        sep(j);
-        write!(j, r#""mesh":{}"#, m).unwrap();
+        o.int("mesh", m as u64);
     }
     if let Some(s) = n.skin {
-        sep(j);
-        write!(j, r#""skin":{}"#, s).unwrap();
+        o.int("skin", s as u64);
     }
     if let Some(ref extras) = n.extras {
-        sep(j);
-        j.push_str(r#""extras":"#);
-        j.push_str(extras);
+        o.raw("extras", extras);
     }
     if !n.children.is_empty() {
-        sep(j);
-        j.push_str(r#""children":["#);
-        for (i, c) in n.children.iter().enumerate() {
-            if i > 0 { j.push(','); }
-            write!(j, "{}", c).unwrap();
+        let mut c = String::new();
+        list(&mut c, "[", &n.children, "]", |j, c| {
+            let _ = write!(j, "{c}");
+        });
+        o.raw("children", &c);
+    }
+    j.push_str(&o.finish());
+}
+
+fn write_skins(j: &mut String, skins: &[GltfSkin]) {
+    if skins.is_empty() {
+        return;
+    }
+    list(j, r#""skins":["#, skins, "],", |j, s| {
+        list(j, r#"{"joints":["#, &s.joints, "]", |j, jt| {
+            let _ = write!(j, "{jt}");
+        });
+        if let Some(ibm) = s.inverse_bind_matrices {
+            let _ = write!(j, r#","inverseBindMatrices":{ibm}"#);
         }
-        j.push(']');
+        j.push('}');
+    });
+}
+
+fn write_meshes(j: &mut String, meshes: &[GltfMesh]) {
+    if meshes.is_empty() {
+        return;
+    }
+    list(j, r#""meshes":["#, meshes, "],", |j, mesh| {
+        let open = format!(r#"{{"name":{},"primitives":["#, json::string(&mesh.name));
+        list(j, &open, &mesh.primitives, "]}", write_primitive);
+    });
+}
+
+fn write_primitive(j: &mut String, p: &Primitive) {
+    let _ = write!(j, r#"{{"attributes":{{"POSITION":{},"NORMAL":{}"#, p.position_accessor, p.normal_accessor);
+    let optional = [
+        ("TANGENT", p.tangent_accessor),
+        ("TEXCOORD_0", p.texcoord_accessor),
+        ("JOINTS_0", p.joints_accessor),
+        ("WEIGHTS_0", p.weights_accessor),
+    ];
+    for (name, acc) in optional {
+        if let Some(acc) = acc {
+            let _ = write!(j, r#","{name}":{acc}"#);
+        }
+    }
+    let _ = write!(j, r#"}},"indices":{}"#, p.indices_accessor);
+    if let Some(mat) = p.material {
+        let _ = write!(j, r#","material":{mat}"#);
+    }
+    j.push_str(r#","mode":4}"#);
+}
+
+fn write_materials(j: &mut String, materials: &[GltfMaterial]) {
+    if materials.is_empty() {
+        return;
+    }
+    list(j, r#""materials":["#, materials, "],", write_material);
+}
+
+fn write_material(j: &mut String, mat: &GltfMaterial) {
+    let _ = write!(
+        j,
+        r#"{{"name":{},"pbrMetallicRoughness":{{"metallicFactor":{},"roughnessFactor":{}"#,
+        json::string(&mat.name),
+        json::num(mat.metallic_factor),
+        json::num(mat.roughness_factor),
+    );
+    if let Some(tex) = mat.base_color_texture {
+        let _ = write!(j, r#","baseColorTexture":{{"index":{tex}}}"#);
+    }
+    #[expect(clippy::float_cmp, reason = "exact default: the factor is assigned, never computed")]
+    let custom_color = mat.base_color_factor != [1.0; 4];
+    if custom_color {
+        j.push_str(r#","baseColorFactor":"#);
+        nums(j, &mat.base_color_factor);
+    }
+    j.push('}');
+    let textures = [
+        ("normalTexture", mat.normal_texture),
+        ("occlusionTexture", mat.occlusion_texture),
+        ("emissiveTexture", mat.emissive_texture),
+    ];
+    for (name, tex) in textures {
+        if let Some(tex) = tex {
+            let _ = write!(j, r#","{name}":{{"index":{tex}}}"#);
+        }
+    }
+    if mat.emissive_factor.iter().any(|&c| c != 0.0) {
+        j.push_str(r#","emissiveFactor":"#);
+        nums(j, &mat.emissive_factor);
+    }
+    if let Some(mode) = mat.alpha_mode {
+        let _ = write!(j, r#","alphaMode":{}"#, json::string(mode));
+        if mode == "MASK" {
+            let _ = write!(j, r#","alphaCutoff":{}"#, json::num(mat.alpha_cutoff));
+        }
+    }
+    if mat.double_sided {
+        j.push_str(r#","doubleSided":true"#);
     }
     j.push('}');
 }
 
-/// A glTF number: never `NaN` / `Infinity`, integral values without a fraction.
-fn format_f32(v: f32) -> String {
-    json::num(v)
+fn write_textures(j: &mut String, images: &[GltfImage], bevy_compat: bool) {
+    if images.is_empty() {
+        return;
+    }
+    j.push_str(r#""samplers":[{"magFilter":9729,"minFilter":9986,"wrapS":10497,"wrapT":10497}],"#);
+    let indexed: Vec<(usize, &GltfImage)> = images.iter().enumerate().collect();
+    list(j, r#""textures":["#, &indexed, "],", |j, &(i, img)| {
+        if img.mime_type == "image/ktx2" && !bevy_compat {
+            // KHR_texture_basisu form: the `source` lives inside the extension.
+            let _ = write!(j, r#"{{"sampler":0,"extensions":{{"KHR_texture_basisu":{{"source":{i}}}}}}}"#);
+        } else {
+            // PNG/JPEG, and the bevy_compat KTX2 path: the standard `source`;
+            // Bevy picks the decoder from `image.mimeType`.
+            let _ = write!(j, r#"{{"sampler":0,"source":{i}}}"#);
+        }
+    });
+    list(j, r#""images":["#, images, "],", |j, img| {
+        let _ = write!(j, r#"{{"bufferView":{},"mimeType":{}}}"#, img.buffer_view, json::string(&img.mime_type));
+    });
 }
 
-fn format_f64(v: f64) -> String {
-    json::num64(v)
+fn write_animations(j: &mut String, animations: &[GltfAnimation]) {
+    if animations.is_empty() {
+        return;
+    }
+    list(j, r#""animations":["#, animations, "],", |j, anim| {
+        let open = format!(r#"{{"name":{},"samplers":["#, json::string(&anim.name));
+        list(j, &open, &anim.samplers, "]", |j, s| {
+            let _ = write!(j, r#"{{"input":{},"output":{},"interpolation":"{}"}}"#, s.input, s.output, s.interpolation);
+        });
+        list(j, r#","channels":["#, &anim.channels, "]}", |j, c| {
+            let _ = write!(j, r#"{{"sampler":{},"target":{{"node":{},"path":"{}"}}}}"#, c.sampler, c.target_node, c.path);
+        });
+    });
+}
+
+fn write_accessors(j: &mut String, accessors: &[Accessor]) {
+    if accessors.is_empty() {
+        return;
+    }
+    list(j, r#""accessors":["#, accessors, "],", |j, acc| {
+        let _ = write!(
+            j,
+            r#"{{"bufferView":{},"componentType":{},"count":{},"type":"{}""#,
+            acc.buffer_view, acc.component_type, acc.count, acc.element_type,
+        );
+        if acc.byte_offset > 0 {
+            let _ = write!(j, r#","byteOffset":{}"#, acc.byte_offset);
+        }
+        if acc.normalized {
+            j.push_str(r#","normalized":true"#);
+        }
+        for (key, bound) in [("min", &acc.min), ("max", &acc.max)] {
+            if let Some(vs) = bound {
+                list(j, &format!(r#","{key}":["#), vs, "]", |j, v| j.push_str(&json::num64(*v)));
+            }
+        }
+        j.push('}');
+    });
+}
+
+/// A buffer must be at least one byte long, so a model whose BIN chunk is empty
+/// declares neither views nor a buffer.
+fn write_buffers(j: &mut String, views: &[BufferView], bin_length: usize) {
+    if !views.is_empty() {
+        list(j, r#""bufferViews":["#, views, "],", |j, bv| {
+            let _ = write!(j, r#"{{"buffer":0,"byteOffset":{},"byteLength":{}"#, bv.offset, bv.length);
+            if let Some(target) = bv.target {
+                let _ = write!(j, r#","target":{target}"#);
+            }
+            j.push('}');
+        });
+    }
+    if bin_length > 0 {
+        let _ = write!(j, r#""buffers":[{{"byteLength":{bin_length}}}],"#);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_minimal_json_valid() {
-        let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[], false);
-        assert!(json.contains(r#""asset""#));
-        assert!(json.contains(r#""version":"2.0""#));
-        assert!(!json.contains(r#""scene""#));
+    fn parse(doc: &Document<'_>) -> serde_json::Value {
+        let text = build_json(doc);
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}: {text}"))
     }
 
     #[test]
-    fn test_bevy_compat_omits_basisu_extension() {
-        let images = vec![GltfImage { buffer_view: 0, mime_type: "image/ktx2".into() }];
-        let bv = vec![BufferView { offset: 0, length: 16, target: None }];
+    fn empty_model_declares_nothing_empty() {
+        // glTF forbids empty arrays, and a scene may only list nodes that exist.
+        let v = parse(&Document::default());
+        assert_eq!(v["asset"]["version"], "2.0");
+        for key in ["scene", "scenes", "nodes", "meshes", "accessors", "bufferViews", "buffers"] {
+            assert!(v.get(key).is_none(), "{key} present: {v}");
+        }
+    }
 
-        let canonical = build_json(&[], &[], &bv, 16, &images, &[], &[], &[], &[], &[], false);
+    #[test]
+    fn bevy_compat_omits_basisu_extension() {
+        let images = [GltfImage { buffer_view: 0, mime_type: "image/ktx2".into() }];
+        let views = [BufferView { offset: 0, length: 16, target: None }];
+        let doc = Document { images: &images, buffer_views: &views, bin_length: 16, ..Document::default() };
+
+        let canonical = build_json(&doc);
         assert!(canonical.contains(r#""extensionsRequired":["KHR_texture_basisu"]"#));
         assert!(canonical.contains(r#""KHR_texture_basisu":{"source":0}"#));
 
-        let bevy = build_json(&[], &[], &bv, 16, &images, &[], &[], &[], &[], &[], true);
+        let bevy = build_json(&Document { bevy_compat: true, ..doc });
         assert!(!bevy.contains("KHR_texture_basisu"));
         assert!(!bevy.contains("extensionsRequired"));
         assert!(bevy.contains(r#""sampler":0,"source":0"#));
@@ -496,21 +448,26 @@ mod tests {
     }
 
     #[test]
-    fn test_format_is_json_safe() {
-        assert_eq!(format_f32(1.0),  "1");
-        assert_eq!(format_f32(-3.0), "-3");
-        assert_eq!(format_f32(1.5),  "1.5");
-        assert_eq!(format_f32(f32::NAN), "0");
-        assert_eq!(format_f64(f64::INFINITY), "0");
-    }
-
-    #[test]
-    fn empty_model_declares_no_scene() {
-        // glTF forbids empty `nodes` arrays, and a scene may only list nodes
-        // that exist.
-        let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[], false);
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(v.get("nodes").is_none(), "{json}");
-        assert!(v.get("scenes").is_none(), "{json}");
+    fn nodes_serialize_every_field() {
+        let nodes = [
+            GltfNode {
+                name: Some("a\"b".into()),
+                translation: Some([1.0, f32::NAN, 0.5]),
+                rotation: Some([0.0, 0.0, 0.0, 1.0]),
+                scale: Some([1.0; 3]),
+                mesh: Some(0),
+                skin: Some(0),
+                children: vec![1],
+                extras: Some(r#"{"k":1}"#.into()),
+            },
+            GltfNode::default(),
+        ];
+        let v = parse(&Document { nodes: &nodes, scene_roots: &[0], ..Document::default() });
+        let n = &v["nodes"][0];
+        assert_eq!(n["name"], "a\"b");
+        assert_eq!(n["translation"][1], 0, "NaN is written as 0");
+        assert_eq!(n["children"][0], 1);
+        assert_eq!(n["extras"]["k"], 1);
+        assert_eq!(v["nodes"][1], serde_json::json!({}));
     }
 }

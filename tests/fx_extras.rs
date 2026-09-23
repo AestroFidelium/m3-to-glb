@@ -10,12 +10,12 @@ use m3_to_glb::fx::curves::FxCurves;
 use m3_to_glb::fx::{FxItem, FxKind, MaterialResolve};
 use m3_to_glb::m3::structures::{Col, Lite, Par, Proj};
 
-fn particle(par: Par) -> serde_json::Value {
+fn particle(par: &Par) -> serde_json::Value {
     let item = FxItem {
         name:       "PAR0_test".into(),
         bone:       0,
         matm_index: Some(0),
-        kind:       FxKind::Particle(Box::new(par)),
+        kind:       FxKind::Particle(Box::new(*par)),
     };
     let mat = MaterialResolve { texture: Some(3), blend: "add", color: None };
     let raw = item.extras_json(&mat, &FxCurves::default());
@@ -35,7 +35,7 @@ fn particle_extras_parse_and_carry_the_emitter() {
     par.color_init.default = Col { b: 255, g: 128, r: 64, a: 255 };
     par.size.default.x = 0.5;
 
-    let v = particle(par);
+    let v = particle(&par);
     let fx = &v["m3fx"];
     assert_eq!(fx["kind"], "particle");
     assert_eq!(fx["spawn"]["rate"], 60.0);
@@ -63,7 +63,7 @@ fn non_finite_fields_stay_valid_json() {
     par.size.default.x = f32::NAN;
     par.size_anim_mid = f32::NAN;
 
-    let v = particle(par);
+    let v = particle(&par);
     let text = v.to_string();
     assert!(!text.contains("NaN"), "{text}");
     assert!(!text.contains("Infinity"), "{text}");
@@ -77,7 +77,7 @@ fn unknown_enum_values_do_not_panic() {
     par.emit_shape = 200;
     par.emit_type = u32::MAX;
 
-    let v = particle(par);
+    let v = particle(&par);
     assert_eq!(v["m3fx"]["orient"], "unknown");
     assert_eq!(v["m3fx"]["shape"]["kind"], "unknown");
     assert_eq!(v["m3fx"]["emit_type"], "unknown");
@@ -161,7 +161,7 @@ fn every_optional_particle_field_is_written() {
     par.uv_flipbook_start_lifespan_factor = 0.5;
     par.trail_system = 0;
 
-    let fx = particle(par)["m3fx"].clone();
+    let fx = particle(&par)["m3fx"].clone();
     for key in ["shape", "angle", "spread", "gravity", "drag", "mass", "noise", "parent_velocity", "tail", "flipbook", "collide"] {
         assert!(fx.get(key).is_some(), "missing {key}: {fx}");
     }
@@ -174,11 +174,11 @@ fn every_optional_particle_field_is_written() {
     assert_eq!(fx["mass"]["random"], 2.0);
 
     par.flags = 0x1 | 0x4_0000; // sort by distance, tail clamp
-    let fx = particle(par)["m3fx"].clone();
+    let fx = particle(&par)["m3fx"].clone();
     assert_eq!(fx["sort"], "distance");
     assert_eq!(fx["tail"]["mode"], "clamp");
     par.flags = 0;
-    assert_eq!(particle(par)["m3fx"]["tail"]["mode"], "free");
+    assert_eq!(particle(&par)["m3fx"]["tail"]["mode"], "free");
 }
 
 #[test]
@@ -197,6 +197,6 @@ fn colour_gradient_keeps_an_independent_alpha_key() {
     let mut par = Par::zeroed();
     par.color_anim_mid = 0.5;
     par.alpha_anim_mid = 0.25;
-    let fx = particle(par)["m3fx"].clone();
+    let fx = particle(&par)["m3fx"].clone();
     assert_eq!(fx["color"]["alpha_mid"], 0.25);
 }

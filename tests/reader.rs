@@ -62,11 +62,11 @@ fn layer_tiling_and_colour() {
         assert!(m3.layer_color(0, "diff").is_none(), "a bitmap layer has no flat colour");
         let c = m3.layer_color(0, "emis1").unwrap();
         assert!((c[0] - 3.0 / 255.0).abs() < 1e-6 && (c[3] - 4.0 / 255.0).abs() < 1e-6);
-        assert_eq!(m3.texture_path_for_layer(0, "diff").unwrap(), "t.dds");
-        assert_eq!(m3.texture_path_for_layer(0, "emis1").unwrap(), "");
-        assert_eq!(m3.texture_path_for_layer(0, "no-such-layer").unwrap(), "");
-        assert_eq!(m3.texture_path_for_layer(0, "norm").unwrap(), "", "absent layer");
-        assert_eq!(m3.texture_path_for_layer(9, "diff").unwrap(), "", "past the table");
+        assert_eq!(m3.texture_path_for_layer(0, "diff"), "t.dds");
+        assert_eq!(m3.texture_path_for_layer(0, "emis1"), "");
+        assert_eq!(m3.texture_path_for_layer(0, "no-such-layer"), "");
+        assert_eq!(m3.texture_path_for_layer(0, "norm"), "", "absent layer");
+        assert_eq!(m3.texture_path_for_layer(9, "diff"), "", "past the table");
         assert!(m3.layer_color(9, "diff").is_none());
     }
     let bytes = spec.build();
@@ -218,7 +218,7 @@ fn misaligned_payloads_are_copied_not_cast() {
         e[4..8].copy_from_slice(&off.to_le_bytes());
         shifted.extend_from_slice(&e);
     }
-    shifted[4..8].copy_from_slice(&(table_at as u32).to_le_bytes());
+    shifted[4..8].copy_from_slice(&len32(table_at).to_le_bytes());
     let a = m3_to_glb::Converter::new().convert(&clean).unwrap();
     let b = m3_to_glb::Converter::new().convert(&shifted).unwrap();
     assert_eq!(a.bytes, b.bytes);
@@ -233,7 +233,7 @@ fn layer_records_past_the_end_of_the_file() {
     let mut bytes = spec.build();
     let index = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
     let n = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-    let far = (bytes.len() as u32 - 8).to_le_bytes();
+    let far = (len32(bytes.len()) - 8).to_le_bytes();
     for i in 0..n {
         let e = index + i * 16;
         if &bytes[e..e + 4] == b"RYAL" {

@@ -41,14 +41,13 @@ const SNORM8_SCALE: f32 = 1.0 / 255.0;
 
 // ─── Position extraction ─────────────────────────────────────────────────────
 
-/// Extract vertex positions from the AoS buffer into the SoA buffers.
+/// Extract vertex positions from the `AoS` buffer into the `SoA` buffers.
 /// SIMD via multiversion (AVX2 / SSE4.1 / scalar fallback).
 pub fn extract_positions_to_soa(span: VertexSpan<'_>, soa: &mut MeshDataSoA) -> Result<()> {
     let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= 12,
-        "vertex_stride {} too small for position (need ≥ 12)",
-        vertex_stride
+        "vertex_stride {vertex_stride} too small for position (need ≥ 12)"
     );
 
     ensure!(
@@ -94,7 +93,7 @@ pub fn extract_positions_to_soa(span: VertexSpan<'_>, soa: &mut MeshDataSoA) -> 
     Ok(())
 }
 
-/// SIMD AABB computation across SoA arrays.
+/// SIMD AABB computation across `SoA` arrays.
 /// Processes 8 floats per iteration with `wide::f32x8`.
 #[multiversion(targets("x86_64+avx2", "x86_64+sse4.1", "aarch64+neon"))]
 fn compute_aabb_simd(xs: &[f32], ys: &[f32], zs: &[f32]) -> ([f32; 3], [f32; 3]) {
@@ -137,14 +136,14 @@ fn compute_aabb_simd(xs: &[f32], ys: &[f32], zs: &[f32]) -> ([f32; 3], [f32; 3])
     let max_za: [f32; 8] = max_z.into();
 
     let mut aabb_min = [
-        min_xa.iter().cloned().fold(f32::MAX, f32::min),
-        min_ya.iter().cloned().fold(f32::MAX, f32::min),
-        min_za.iter().cloned().fold(f32::MAX, f32::min),
+        min_xa.iter().copied().fold(f32::MAX, f32::min),
+        min_ya.iter().copied().fold(f32::MAX, f32::min),
+        min_za.iter().copied().fold(f32::MAX, f32::min),
     ];
     let mut aabb_max = [
-        max_xa.iter().cloned().fold(f32::MIN, f32::max),
-        max_ya.iter().cloned().fold(f32::MIN, f32::max),
-        max_za.iter().cloned().fold(f32::MIN, f32::max),
+        max_xa.iter().copied().fold(f32::MIN, f32::max),
+        max_ya.iter().copied().fold(f32::MIN, f32::max),
+        max_za.iter().copied().fold(f32::MIN, f32::max),
     ];
 
     // Tail (< 8 vertices).
@@ -162,7 +161,7 @@ fn compute_aabb_simd(xs: &[f32], ys: &[f32], zs: &[f32]) -> ([f32; 3], [f32; 3])
 
 // ─── Normal decoding ─────────────────────────────────────────────────────────
 
-/// Decode normals from uint8 → f32 (Vector3As3uint8 per structures.xml).
+/// Decode normals from uint8 → f32 (`Vector3As3uint8` per structures.xml).
 /// Formula: `n / 255.0` — output range [0..1].
 /// For a true unit vector we also do `n * 2.0 - 1.0`; glTF nominally accepts
 /// the [0..1] range too but we normalise downstream.
@@ -176,9 +175,7 @@ pub fn decode_normals_simd(
     let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
-        "vertex_stride {} too small for normals (offset={})",
-        vertex_stride,
-        component_offset
+        "vertex_stride {vertex_stride} too small for normals (offset={component_offset})"
     );
 
     let mut raw_nx: Vec<f32> = Vec::with_capacity(vertex_count);
@@ -190,9 +187,9 @@ pub fn decode_normals_simd(
         let base = (first_vertex + i) * vertex_stride + component_offset;
 
         // uint8 → f32; we normalise to [-1..1] via `*2-1` below.
-        let nx = vertex_data[base] as f32;
-        let ny = vertex_data[base + 1] as f32;
-        let nz = vertex_data[base + 2] as f32;
+        let nx = f32::from(vertex_data[base]);
+        let ny = f32::from(vertex_data[base + 1]);
+        let nz = f32::from(vertex_data[base + 2]);
 
         raw_nx.push(nx);
         raw_ny.push(ny);
@@ -205,13 +202,13 @@ pub fn decode_normals_simd(
     let mut ny_f = scale_array_simd(&raw_ny, scale);
     let mut nz_f = scale_array_simd(&raw_nz, scale);
     // Recentre: [0..1] → [-1..1].
-    for v in nx_f.iter_mut() {
+    for v in &mut nx_f {
         *v = *v * 2.0 - 1.0;
     }
-    for v in ny_f.iter_mut() {
+    for v in &mut ny_f {
         *v = *v * 2.0 - 1.0;
     }
-    for v in nz_f.iter_mut() {
+    for v in &mut nz_f {
         *v = *v * 2.0 - 1.0;
     }
 
@@ -241,14 +238,14 @@ use super::SkinLayout;
 
 /// Pull skin data (joints + weights) out of the vertex buffer.
 ///
-/// The layout follows m3studio (io_m3.py:144 `get_vertex_description`):
+/// The layout follows m3studio (`io_m3.py:144` `get_vertex_description`):
 /// first `pairs` weight bytes, then `pairs` lookup bytes. The lookup byte
 /// indexes a window
 /// `bone_lookup_full[region.first_bone_lookup_index..+region.bone_lookup_count]`,
 /// and the value at that window position is the global bone index
 /// (= index in `skin.joints[]`).
 ///
-/// glTF JOINTS_0 / WEIGHTS_0 are always VEC4 — for 2-pair models (skin0
+/// glTF `JOINTS_0` / `WEIGHTS_0` are always VEC4 — for 2-pair models (skin0
 /// only or skin1 only) slots 2..3 are filled with index 0 and weight 0.
 pub fn decode_skin(
     span:          VertexSpan<'_>,
@@ -260,13 +257,11 @@ pub fn decode_skin(
     let SkinLayout { weights_offset, lookups_offset, pairs } = layout;
     ensure!(
         pairs <= 4,
-        "skin pairs ({}) > 4 unsupported by glTF VEC4",
-        pairs
+        "skin pairs ({pairs}) > 4 unsupported by glTF VEC4"
     );
     ensure!(
         vertex_stride >= weights_offset + pairs && vertex_stride >= lookups_offset + pairs,
-        "vertex_stride {} too small for skin (w_off={} l_off={} pairs={})",
-        vertex_stride, weights_offset, lookups_offset, pairs
+        "vertex_stride {vertex_stride} too small for skin (w_off={weights_offset} l_off={lookups_offset} pairs={pairs})"
     );
 
     soa.has_skin = true;
@@ -329,16 +324,12 @@ pub fn decode_tangents(
     let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
-        "vertex_stride {} too small for tangent (offset={})",
-        vertex_stride,
-        component_offset
+        "vertex_stride {vertex_stride} too small for tangent (offset={component_offset})"
     );
     if let Some(n_off) = normal_offset {
         ensure!(
             vertex_stride >= n_off + 4,
-            "vertex_stride {} too small for normal sign byte (normal_off={})",
-            vertex_stride,
-            n_off
+            "vertex_stride {vertex_stride} too small for normal sign byte (normal_off={n_off})"
         );
     }
 
@@ -346,9 +337,9 @@ pub fn decode_tangents(
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride + component_offset;
 
-        let tx_raw = vertex_data[base] as f32;
-        let ty_raw = vertex_data[base + 1] as f32;
-        let tz_raw = vertex_data[base + 2] as f32;
+        let tx_raw = f32::from(vertex_data[base]);
+        let ty_raw = f32::from(vertex_data[base + 1]);
+        let tz_raw = f32::from(vertex_data[base + 2]);
 
         let tx = (tx_raw / 255.0) * 2.0 - 1.0;
         let ty = (ty_raw / 255.0) * 2.0 - 1.0;
@@ -398,9 +389,7 @@ pub fn decode_uvs(
     let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
-        "vertex_stride {} too small for UV (offset={})",
-        vertex_stride,
-        component_offset
+        "vertex_stride {vertex_stride} too small for UV (offset={component_offset})"
     );
     let scale: f32 = uv_multiply / 32768.0;
     ensure!(span_fits(span), "UV data out of bounds");
@@ -412,8 +401,8 @@ pub fn decode_uvs(
 
         // A corrupt region's multiply/offset can be non-finite.
         let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
-        soa.uvs_u.push(finite(u_raw as f32 * scale + uv_offset));
-        soa.uvs_v.push(finite(v_raw as f32 * scale + uv_offset));
+        soa.uvs_u.push(finite(f32::from(u_raw) * scale + uv_offset));
+        soa.uvs_v.push(finite(f32::from(v_raw) * scale + uv_offset));
     }
     let dbg_start = soa.uvs_u.len().saturating_sub(vertex_count);
     for i in 0..vertex_count.min(3) {

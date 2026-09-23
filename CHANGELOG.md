@@ -17,7 +17,8 @@ checked against an independent glTF loader in the test suite.
 - `--completions <SHELL>` (bash, fish, zsh, elvish, powershell).
 - Test suite: synthetic M3 writer, GLB oracle, structure-aware libFuzzer target
   over the whole pipeline, CLI tests, opt-in real-corpus test (`M3_CORPUS`).
-- CI: clippy, tests, stable + MSRV builds, coverage, fuzzing (per push and
+- CI: clippy (`pedantic` plus selected `restriction` lints, warnings as
+  errors), tests, stable + MSRV builds, coverage, fuzzing (per push and
   nightly); tagged releases build Linux / Windows / macOS binaries.
 
 ### Fixed
@@ -38,6 +39,10 @@ checked against an independent glTF loader in the test suite.
   library is now `#![forbid(unsafe_code)]`.
 
 ### Changed
+- The GLB packer is split into buffers, materials, scene and animation
+  modules; output is byte-identical to before.
+- `Stats::textures` and the CLI summary count textures embedded in the GLB,
+  not images found in the texture folder.
 - MSRV 1.88; the crate builds on stable (nightly remains the dev toolchain).
 - `build.rs` removed — it wrote shell completions into the source tree.
 - JSON numbers are written without a trailing `.0`.

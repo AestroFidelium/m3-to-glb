@@ -49,16 +49,16 @@ fn stride_pos_only() {
 #[test]
 fn stride_anduin_reference() {
     // Storm_Hero_Anduin_Base.m3 — the Phase-1 regression anchor.
-    // 0x01820061 = pos | skin0 | skin1 | uv0 | normal | tangent.
+    // 0x0182_0061 = pos | skin0 | skin1 | uv0 | normal | tangent.
     // 12 + 4 + 4 + 4 + 4 + 4 = 32.
-    assert_eq!(stride_from_flags(0x01820061), 32);
+    assert_eq!(stride_from_flags(0x0182_0061), 32);
 }
 
 // ── VertexOffsets::from_flags ──────────────────────────────────────────────────
 
 #[test]
 fn offsets_anduin_reference() {
-    let o = VertexOffsets::from_flags(0x01820061);
+    let o = VertexOffsets::from_flags(0x0182_0061);
     let skin = o.skin.expect("Anduin has skin");
     assert_eq!(skin.pairs, 4);
     assert_eq!(skin.weights_offset, 12);

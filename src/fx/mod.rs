@@ -18,7 +18,7 @@
 //! Every value here is the field's **static default** — the value the emitter
 //! holds when no animation drives it. M3 can animate most of them through the
 //! `STC_`/`STS_` sequence data; that resolution is not done here (see
-//! `processor::anim` for the machinery that does it for bones). For most HotS
+//! `processor::anim` for the machinery that does it for bones). For most `HotS`
 //! ability effects the defaults are what the effect looks like, because the
 //! emitters are switched on and off by *spawning the model*, not by animating
 //! the rate to zero.
@@ -202,10 +202,10 @@ const F_COLLIDE_TERRAIN: u32 = 0x2;
 const F_COLLIDE_OBJECTS: u32 = 0x4;
 const F_INHERIT_PARENT_VELOCITY: u32 = 0x40;
 const F_SORT_HEIGHT: u32 = 0x80;
-const F_RANDOM_UV_FLIPBOOK_START: u32 = 0x10000;
-const F_TAIL_CLAMP: u32 = 0x40000;
-const F_TAIL_FIX: u32 = 0x100000;
-const F_MODEL_PARTICLES: u32 = 0x400000;
+const F_RANDOM_UV_FLIPBOOK_START: u32 = 0x0001_0000;
+const F_TAIL_CLAMP: u32 = 0x0004_0000;
+const F_TAIL_FIX: u32 = 0x0010_0000;
+const F_MODEL_PARTICLES: u32 = 0x0040_0000;
 
 // `additional_flags` bits (PAR_ v17+).
 const AF_EMIT_SPEED_RANDOMIZE: u32 = 0x1;
@@ -216,7 +216,18 @@ const AF_WORLD_SPACE: u32 = 0x8;
 fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
     let mut j = Obj::new();
     j.string("kind", "particle");
+    spawn_json(&mut j, p, curves);
+    emission_json(&mut j, p);
+    over_lifetime_json(&mut j, p);
+    look_json(&mut j, p);
+    material_json(&mut j, mat);
+    simulation_json(&mut j, p);
+    anim_json(&mut j, p, curves);
+    j.finish()
+}
 
+/// Capacity, spawn rate / burst and their timing, lifetime and speed.
+fn spawn_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
     let lifespan = nz(p.lifespan.default, 1.0);
     // The rate an engine should actually spawn at. A HotS emitter is normally
     // authored with a static rate of zero and a curve that bursts inside one
@@ -230,8 +241,9 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
     // emitter's own cap; when it is unset, the steady state of rate × lifetime
     // is the honest number. Clamped so one bad field cannot ask for a
     // million-particle buffer.
-    let steady = (rate * lifespan * 1.25).ceil().max(1.0);
-    let capacity = if p.emit_max > 0 { p.emit_max.min(65536) } else { steady as u32 };
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to 1..=65536 first")]
+    let steady = (rate * lifespan * 1.25).ceil().clamp(1.0, 65536.0) as u32;
+    let capacity = if p.emit_max > 0 { p.emit_max.min(65536) } else { steady };
     j.int("capacity", u64::from(capacity.clamp(4, 65536)));
 
     // ── spawning ─────────────────────────────────────────────────────────────
@@ -248,6 +260,8 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
                 peak.max(f32::from(p.emit_count.default))
             });
         if burst_count > 0.0 {
+            // A 16-bit track: positive and at most 65535 here.
+            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "positive, from a 16-bit track")]
             s.int("burst", burst_count as u64);
         }
         if p.emit_max > 0 {
@@ -281,7 +295,10 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
             p.additional_flags & AF_EMIT_SPEED_RANDOMIZE != 0,
         ),
     );
+}
 
+/// Where particles appear and the forces acting on them.
+fn emission_json(j: &mut Obj, p: &Par) {
     // ── emission geometry ────────────────────────────────────────────────────
     j.string("emit_type", pick(&EMIT_TYPES, p.emit_type));
     {
@@ -329,7 +346,10 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
     if p.flags & F_INHERIT_PARENT_VELOCITY != 0 {
         j.num("parent_velocity", nz(p.parent_velocity.default, 1.0));
     }
+}
 
+/// Size, rotation and colour over a particle's life.
+fn over_lifetime_json(j: &mut Obj, p: &Par) {
     // ── over-lifetime curves ─────────────────────────────────────────────────
     // M3 stores these as a (start, middle, end) triple plus the position of the
     // middle key along the lifetime — exactly a three-key gradient.
@@ -370,7 +390,10 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
             ]),
         ),
     );
+}
 
+/// Orientation, tail and sprite-sheet flipbook.
+fn look_json(j: &mut Obj, p: &Par) {
     // ── look ─────────────────────────────────────────────────────────────────
     j.string("orient", pick(&PARTICLE_TYPES, p.particle_type));
     if matches!(p.particle_type, 1 | 6 | 9 | 10) {
@@ -405,9 +428,10 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
         }
         j.raw("flipbook", &s.finish());
     }
+}
 
-    material_json(&mut j, mat);
-
+/// Simulation space, sorting, collision and pass-through flags.
+fn simulation_json(j: &mut Obj, p: &Par) {
     // ── simulation ───────────────────────────────────────────────────────────
     j.string("space", if p.additional_flags & AF_WORLD_SPACE != 0 { "world" } else { "local" });
     if p.flags & (F_SORT_DISTANCE | F_SORT_HEIGHT) != 0 {
@@ -427,13 +451,9 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
     if p.flags & F_MODEL_PARTICLES != 0 {
         j.bool("model_particles", true);
     }
-    if p.trail_system >= 0 {
-        j.int("trail_of", p.trail_system as u64);
+    if let Ok(trail) = u64::try_from(p.trail_system) {
+        j.int("trail_of", trail);
     }
-
-    anim_json(&mut j, p, curves);
-
-    j.finish()
 }
 
 /// The emitter's animated tracks, grouped by the sequence that drives them:
@@ -444,6 +464,15 @@ fn particle_json(p: &Par, mat: &MaterialResolve, curves: &FxCurves) -> String {
 /// decide whether — and how big — an effect appears are carried; everything else
 /// stays at its default.
 fn anim_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
+    fn slot(by_seq: &mut Vec<(String, Obj)>, name: &str) -> usize {
+        if let Some(i) = by_seq.iter().position(|(n, _)| n == name) {
+            i
+        } else {
+            by_seq.push((name.to_owned(), Obj::new()));
+            by_seq.len() - 1
+        }
+    }
+
     if curves.is_empty() {
         return;
     }
@@ -464,14 +493,6 @@ fn anim_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
     // Sequence name → the tracks it drives. Built as a list to keep the output
     // ordered by the first track that mentions each sequence.
     let mut by_seq: Vec<(String, Obj)> = Vec::new();
-    fn slot(by_seq: &mut Vec<(String, Obj)>, name: &str) -> usize {
-        if let Some(i) = by_seq.iter().position(|(n, _)| n == name) {
-            i
-        } else {
-            by_seq.push((name.to_owned(), Obj::new()));
-            by_seq.len() - 1
-        }
-    }
 
     for (key, id) in reals {
         for (seq, curve) in curves.real(id) {

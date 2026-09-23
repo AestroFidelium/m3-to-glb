@@ -5,6 +5,8 @@
 //! (`cargo bolero test fuzz_parse_never_panics`) and a set of deterministic
 //! regression tests pinning specific malformed-input crash classes.
 
+#![allow(clippy::print_stderr, reason = "tests report skipped inputs")]
+
 use bolero::check;
 use m3_to_glb::m3;
 use m3_to_glb::processor;
@@ -35,9 +37,9 @@ fn fuzz_parse_never_panics() {
 // ── Deterministic regression seeds (crash classes) ─────────────────────────────
 
 /// Build a minimal 12-byte M3 header: LE magic + tag-index offset + tag count.
-fn header(magic: &[u8; 4], index_offset: u32, num_tags: u32) -> Vec<u8> {
+fn header(magic: [u8; 4], index_offset: u32, num_tags: u32) -> Vec<u8> {
     let mut v = Vec::new();
-    v.extend_from_slice(magic);
+    v.extend_from_slice(&magic);
     v.extend_from_slice(&index_offset.to_le_bytes());
     v.extend_from_slice(&num_tags.to_le_bytes());
     v
@@ -52,14 +54,14 @@ fn parse_empty_is_err_not_panic() {
 fn parse_header_only_no_tags_is_err() {
     // Valid magic but the file ends right after the 12-byte header: the tag
     // table can't fit.
-    let data = header(b"43DM", 12, 1);
+    let data = header(*b"43DM", 12, 1);
     assert!(m3::parse(&data).is_err());
 }
 
 #[test]
 fn parse_truncated_tag_table_is_err() {
     // Claims 100 tags (100 * 16 = 1600 bytes) but supplies far fewer.
-    let mut data = header(b"43DM", 12, 100);
+    let mut data = header(*b"43DM", 12, 100);
     data.resize(64, 0);
     assert!(m3::parse(&data).is_err());
 }
@@ -68,7 +70,7 @@ fn parse_truncated_tag_table_is_err() {
 fn parse_misaligned_tag_offset_is_err_not_panic() {
     // `MdIndexEntry` is 16 bytes / align 4. A tag offset of 13 makes
     // `cast_slice` see a misaligned slice → it used to panic. It must Err.
-    let mut data = header(b"43DM", 13, 1);
+    let mut data = header(*b"43DM", 13, 1);
     data.resize(13 + 16, 0); // room for one 16-byte entry at offset 13
     let _ = m3::parse(&data); // must not panic; Ok or Err both acceptable
 }
@@ -76,7 +78,7 @@ fn parse_misaligned_tag_offset_is_err_not_panic() {
 #[test]
 fn parse_huge_tag_count_is_err_not_panic() {
     // Enormous tag count must be rejected by the bounds check, not overflow.
-    let data = header(b"43DM", 12, u32::MAX);
+    let data = header(*b"43DM", 12, u32::MAX);
     assert!(m3::parse(&data).is_err());
 }
 

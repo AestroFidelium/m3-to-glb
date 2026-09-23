@@ -35,7 +35,6 @@ fn map(path: &str) -> Result<memmap2::Mmap> {
     // conversion. The one hazard of `Mmap` — another process truncating or
     // rewriting the file while it is mapped — cannot make the parser unsound:
     // it treats every byte as untrusted and bounds-checks every access.
-    #[allow(unsafe_code)]
     let map = unsafe { memmap2::Mmap::map(&file) };
     map.with_context(|| format!("cannot map {path}"))
 }

@@ -11,7 +11,7 @@
 //! [`check_glb`] is the other half: everything the converter emits must be a
 //! GLB that an independent loader accepts and whose internals are consistent.
 
-#![allow(dead_code)] // each test binary uses a different subset
+#![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use bytemuck::{Pod, Zeroable};
 use m3_to_glb::m3::structures::{
@@ -20,6 +20,12 @@ use m3_to_glb::m3::structures::{
 use m3_to_glb::m3::{layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags};
 use m3_to_glb::m3::reader::M3File;
 use m3_to_glb::processor::VertexOffsets;
+
+/// A length or index as the `u32` the M3 format stores. Test fixtures stay far
+/// below 4 GiB, so overflowing is a bug in the test.
+pub fn len32(n: usize) -> u32 {
+    u32::try_from(n).expect("test fixture larger than 4 GiB")
+}
 
 // ─── Raw tag writer ──────────────────────────────────────────────────────────
 
@@ -52,7 +58,7 @@ impl M3Writer {
         let mut n: [u8; 4] = name.as_bytes().try_into().expect("tag names are 4 bytes");
         n.reverse();
         self.tags.push(Tag { name: n, version, data, reps });
-        (self.tags.len() - 1) as u32
+        len32(self.tags.len() - 1)
     }
 
     /// Add a tag of `Pod` records and return a reference to all of them. An
@@ -62,8 +68,8 @@ impl M3Writer {
             return Reference::zeroed();
         }
         let data = bytemuck::cast_slice(items).to_vec();
-        let index = self.raw(name, version, data, items.len() as u32);
-        Reference { entries: items.len() as u32, index, flags: 0 }
+        let index = self.raw(name, version, data, len32(items.len()));
+        Reference { entries: len32(items.len()), index, flags: 0 }
     }
 
     /// Records whose on-disk size differs from the Rust struct (older
@@ -72,8 +78,8 @@ impl M3Writer {
         if records.is_empty() {
             return Reference::zeroed();
         }
-        let index = self.raw(name, version, records.concat(), records.len() as u32);
-        Reference { entries: records.len() as u32, index, flags: 0 }
+        let index = self.raw(name, version, records.concat(), len32(records.len()));
+        Reference { entries: len32(records.len()), index, flags: 0 }
     }
 
     /// A NUL-terminated `CHAR` string. The empty string is the null reference.
@@ -83,7 +89,7 @@ impl M3Writer {
         }
         let mut data = s.as_bytes().to_vec();
         data.push(0);
-        let n = data.len() as u32;
+        let n = len32(data.len());
         let index = self.raw("CHAR", 0, data, n);
         Reference { entries: n, index, flags: 0 }
     }
@@ -93,12 +99,12 @@ impl M3Writer {
         let mut out = vec![0u8; 16];
         let mut entries = Vec::with_capacity(self.tags.len());
         for t in &self.tags {
-            let offset = out.len() as u32;
+            let offset = len32(out.len());
             out.extend_from_slice(&t.data);
             align(&mut out);
             entries.push((t, offset));
         }
-        let index_offset = out.len() as u32;
+        let index_offset = len32(out.len());
         for (t, offset) in &entries {
             out.extend_from_slice(&t.name);
             out.extend_from_slice(&offset.to_le_bytes());
@@ -107,7 +113,7 @@ impl M3Writer {
         }
         out[0..4].copy_from_slice(&self.magic);
         out[4..8].copy_from_slice(&index_offset.to_le_bytes());
-        out[8..12].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        out[8..12].copy_from_slice(&len32(entries.len()).to_le_bytes());
         out
     }
 }
@@ -319,8 +325,28 @@ impl ModelSpec {
     /// Serialize to M3 bytes.
     pub fn build(&self) -> Vec<u8> {
         let mut w = M3Writer::new(self.magic);
+        self.write_geometry(&mut w);
+        let (bones_ref, bone_lookup) = self.write_skeleton(&mut w);
+        self.write_materials(&mut w);
+        let [seqs_ref, stc_ref, stg_ref] = self.write_animation(&mut w);
+        self.write_effects(&mut w);
 
-        // ── Geometry ────────────────────────────────────────────────────────
+        // MODL: only the fields the reader consults.
+        let mut modl = vec![0u8; 136];
+        let mut put = |at: usize, bytes: &[u8]| modl[at..at + bytes.len()].copy_from_slice(bytes);
+        put(16, bytemuck::bytes_of(&seqs_ref));
+        put(28, bytemuck::bytes_of(&stc_ref));
+        put(40, bytemuck::bytes_of(&stg_ref));
+        put(80, bytemuck::bytes_of(&bones_ref));
+        put(96, &self.vertex_flags.to_le_bytes());
+        put(124, bytemuck::bytes_of(&bone_lookup));
+        w.raw("MODL", 23, modl, 1);
+
+        w.finish()
+    }
+
+    /// Vertex buffer, faces, regions, batches and the division tying them.
+    fn write_geometry(&self, w: &mut M3Writer) {
         let stride = stride_from_flags(self.vertex_flags);
         let offsets = VertexOffsets::from_flags(self.vertex_flags);
         let mut vbuf = vec![0u8; stride * self.vertices.len()];
@@ -345,16 +371,14 @@ impl ModelSpec {
                 vbuf[at(lo)..at(lo + s.pairs)].copy_from_slice(&v.lookups[..s.pairs]);
             }
         }
-        let slack = self.vertex_slack;
-        if slack >= 0 {
-            vbuf.resize(vbuf.len() + slack as usize, 0);
-        } else {
-            vbuf.truncate(vbuf.len().saturating_sub(slack.unsigned_abs() as usize));
+        match usize::try_from(self.vertex_slack) {
+            Ok(extra) => vbuf.resize(vbuf.len() + extra, 0),
+            Err(_) => vbuf.truncate(vbuf.len().saturating_sub(self.vertex_slack.unsigned_abs() as usize)),
         }
 
         let geometry = !self.vertices.is_empty() || self.force_division;
         if geometry {
-            let n = vbuf.len() as u32;
+            let n = len32(vbuf.len());
             w.raw("U8__", 0, vbuf, n);
         }
         let faces = w.pods("U16_", 0, &self.faces);
@@ -375,8 +399,10 @@ impl ModelSpec {
             let div = Div { faces, regions, batches, msec: Reference::zeroed(), instances: 0 };
             w.pods("DIV_", 2, &[div]);
         }
+    }
 
-        // ── Skeleton ────────────────────────────────────────────────────────
+    /// Bones, the bone lookup table and (optionally) rest matrices.
+    fn write_skeleton(&self, w: &mut M3Writer) -> (Reference, Reference) {
         let bone_lookup = w.pods("U16_", 0, &self.bone_lookup);
         let bones: Vec<Bone> = self
             .bones
@@ -400,11 +426,14 @@ impl ModelSpec {
         let bones_ref = w.pods("BONE", 1, &bones);
         if self.iref {
             let irefs = vec![0u8; 64 * self.bones.len()];
-            w.raw("IREF", 0, irefs, self.bones.len() as u32);
+            w.raw("IREF", 0, irefs, len32(self.bones.len()));
         }
+        (bones_ref, bone_lookup)
+    }
 
-        // ── Materials ───────────────────────────────────────────────────────
-        let mats: Vec<Vec<u8>> = self.materials.iter().map(|m| self.mat_bytes(&mut w, m)).collect();
+    /// `MAT_` + `LAYR`, `MADD`, `MATM` and `CMP_`.
+    fn write_materials(&self, w: &mut M3Writer) {
+        let mats: Vec<Vec<u8>> = self.materials.iter().map(|m| self.mat_bytes(w, m)).collect();
         w.records("MAT_", self.mat_version, &mats);
         let madds: Vec<Vec<u8>> = self
             .madds
@@ -440,9 +469,11 @@ impl ModelSpec {
             })
             .collect();
         w.records("CMP_", 2, &cmps);
+    }
 
-        // ── Animation ───────────────────────────────────────────────────────
-        let stcs: Vec<Stc> = self.stcs.iter().map(|s| stc(&mut w, s)).collect();
+    /// `STC_`, `SEQS` and `STG_`; returns their references for MODL.
+    fn write_animation(&self, w: &mut M3Writer) -> [Reference; 3] {
+        let stcs: Vec<Stc> = self.stcs.iter().map(|s| stc(w, s)).collect();
         let stc_ref = w.pods("STC_", 4, &stcs);
         let (seqs, stgs): (Vec<Vec<u8>>, Vec<Stg>) = self
             .sequences
@@ -466,8 +497,11 @@ impl ModelSpec {
             .unzip();
         let seqs_ref = w.records("SEQS", self.seqs_version, &seqs);
         let stg_ref = w.pods("STG_", 0, &stgs);
+        [seqs_ref, stc_ref, stg_ref]
+    }
 
-        // ── Effects & attachments ───────────────────────────────────────────
+    /// Particles, lights, projections, attachment points and volumes.
+    fn write_effects(&self, w: &mut M3Writer) {
         let pars: Vec<Vec<u8>> = self.particles.iter().map(|p| par_bytes(p, self.par_version)).collect();
         w.records("PAR_", self.par_version, &pars);
         w.pods("LITE", self.lite_version, &self.lights);
@@ -483,19 +517,6 @@ impl ModelSpec {
             .collect();
         w.pods("ATT_", self.att_version, &atts);
         w.pods("ATVL", self.atvl_version, &self.volumes);
-
-        // ── MODL ────────────────────────────────────────────────────────────
-        let mut modl = vec![0u8; 136];
-        let mut put = |at: usize, bytes: &[u8]| modl[at..at + bytes.len()].copy_from_slice(bytes);
-        put(16, bytemuck::bytes_of(&seqs_ref));
-        put(28, bytemuck::bytes_of(&stc_ref));
-        put(40, bytemuck::bytes_of(&stg_ref));
-        put(80, bytemuck::bytes_of(&bones_ref));
-        put(96, &self.vertex_flags.to_le_bytes());
-        put(124, bytemuck::bytes_of(&bone_lookup));
-        w.raw("MODL", 23, modl, 1);
-
-        w.finish()
     }
 
     fn region_bytes(&self, r: &RegionSpec) -> Vec<u8> {
@@ -518,8 +539,10 @@ impl ModelSpec {
                 // first_face up to (not including) flags.
                 let mut v = Vec::with_capacity(28);
                 v.extend_from_slice(&b[0..4]);
-                v.extend_from_slice(&(r.first_vertex as u16).to_le_bytes());
-                v.extend_from_slice(&(r.vertex_count as u16).to_le_bytes());
+                // v≤2 stores these as u16; larger fixture values saturate.
+                let short = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
+                v.extend_from_slice(&short(r.first_vertex).to_le_bytes());
+                v.extend_from_slice(&short(r.vertex_count).to_le_bytes());
                 v.extend_from_slice(&b[16..36]);
                 v
             }
@@ -529,12 +552,12 @@ impl ModelSpec {
         }
     }
 
-    fn mat_bytes(&self, w: &mut M3Writer, m: &MatSpec) -> Vec<u8> {
+    fn mat_bytes(&self, w: &mut M3Writer, mat: &MatSpec) -> Vec<u8> {
         let mut rec = vec![0u8; mat_record_size(self.mat_version)];
-        rec[16..20].copy_from_slice(&m.flags.to_le_bytes());
-        rec[20..24].copy_from_slice(&m.blend.to_le_bytes());
-        rec[40..44].copy_from_slice(&m.alpha_threshold.to_le_bytes());
-        for (name, layer) in &m.layers {
+        rec[16..20].copy_from_slice(&mat.flags.to_le_bytes());
+        rec[20..24].copy_from_slice(&mat.blend.to_le_bytes());
+        rec[40..44].copy_from_slice(&mat.alpha_threshold.to_le_bytes());
+        for (name, layer) in &mat.layers {
             let Some(at) = M3File::mat_layer_offset(self.mat_version, name) else { continue };
             let mut l = vec![0u8; layr_record_size(self.layr_version)];
             let bitmap = w.chars(&layer.texture);
@@ -563,41 +586,41 @@ fn sd_block<K: Pod>(w: &mut M3Writer, key_tag: &str, keys: &[(i32, K)]) -> [Refe
     [w.pods("I32_", 0, &frames), w.pods(key_tag, 0, &values)]
 }
 
-fn stc(w: &mut M3Writer, s: &StcSpec) -> Stc {
+fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
     let mut out = Stc::zeroed();
-    out.name = w.chars(&s.name);
+    out.name = w.chars(&spec.name);
     let mut ids = Vec::new();
     let mut refs = Vec::new();
-    let (mut v3, mut q, mut r, mut i16s, mut u16s) = (vec![], vec![], vec![], vec![], vec![]);
-    for (id, track) in &s.tracks {
+    let (mut vec3s, mut quats, mut reals, mut i16s, mut u16s) = (vec![], vec![], vec![], vec![], vec![]);
+    for (id, track) in &spec.tracks {
         let (kind, blocks, block) = match track {
-            Track::Vec3(k) => (2u32, &mut v3, sd_block(w, "VEC3", k)),
+            Track::Vec3(k) => (2u32, &mut vec3s, sd_block(w, "VEC3", k)),
             Track::Quat(k) => {
                 let k: Vec<(i32, m3_to_glb::m3::structures::Quat)> = k
                     .iter()
                     .map(|&(t, v)| (t, m3_to_glb::m3::structures::Quat { x: v[0], y: v[1], z: v[2], w: v[3] }))
                     .collect();
-                (3, &mut q, sd_block(w, "QUAT", &k))
+                (3, &mut quats, sd_block(w, "QUAT", &k))
             }
-            Track::Real(k) => (5, &mut r, sd_block(w, "REAL", k)),
+            Track::Real(k) => (5, &mut reals, sd_block(w, "REAL", k)),
             Track::I16(k) => (7, &mut i16s, sd_block(w, "I16_", k)),
             Track::U16(k) => (8, &mut u16s, sd_block(w, "U16_", k)),
         };
         ids.push(*id);
-        refs.push((kind << 16) | blocks.len() as u32);
-        let mut b = [0u8; 32];
-        b[0..12].copy_from_slice(bytemuck::bytes_of(&block[0]));
-        b[20..32].copy_from_slice(bytemuck::bytes_of(&block[1]));
-        blocks.push(b);
+        refs.push((kind << 16) | len32(blocks.len()));
+        let mut record = [0u8; 32];
+        record[0..12].copy_from_slice(bytemuck::bytes_of(&block[0]));
+        record[20..32].copy_from_slice(bytemuck::bytes_of(&block[1]));
+        blocks.push(record);
     }
-    if s.short_refs {
+    if spec.short_refs {
         refs.pop();
     }
     out.anim_ids = w.pods("U32_", 0, &ids);
     out.anim_refs = w.pods("U32_", 0, &refs);
-    out.sd3v = w.pods("SD3V", 0, &v3);
-    out.sd4q = w.pods("SD4Q", 0, &q);
-    out.sdr3 = w.pods("SDR3", 0, &r);
+    out.sd3v = w.pods("SD3V", 0, &vec3s);
+    out.sd4q = w.pods("SD4Q", 0, &quats);
+    out.sdr3 = w.pods("SDR3", 0, &reals);
     out.sds6 = w.pods("SDS6", 0, &i16s);
     out.sdu6 = w.pods("SDU6", 0, &u16s);
     out
@@ -624,7 +647,7 @@ pub fn skinned_quad() -> ModelSpec {
     spec.vertex_flags = FLAGS_SKINNED;
     for (i, v) in spec.vertices.iter_mut().enumerate() {
         v.weights = [200, 55, 0, 0];
-        v.lookups = [(i % 2) as u8, 1, 0, 0];
+        v.lookups = [u8::from(i % 2 == 1), 1, 0, 0];
     }
     spec.bones = vec![
         BoneSpec { t: [0.0, 0.0, 1.0], ..BoneSpec::named("Root", -1) },
@@ -766,30 +789,7 @@ fn u32_at(b: &[u8], at: usize) -> Result<u32, String> {
 /// the cross-references it does not check — buffer ranges, index ranges,
 /// animation timing, and an acyclic node forest.
 pub fn check_glb(glb: &[u8]) -> Result<GlbSummary, String> {
-    if u32_at(glb, 0)? != 0x4654_6C67 || u32_at(glb, 4)? != 2 {
-        return Err("bad GLB header".into());
-    }
-    if u32_at(glb, 8)? as usize != glb.len() {
-        return Err("header length != file length".into());
-    }
-    let json_len = u32_at(glb, 12)? as usize;
-    if u32_at(glb, 16)? != 0x4E4F_534A || !json_len.is_multiple_of(4) {
-        return Err("bad JSON chunk".into());
-    }
-    let json_bytes = glb.get(20..20 + json_len).ok_or("JSON chunk truncated")?;
-    let json: serde_json::Value =
-        serde_json::from_slice(json_bytes).map_err(|e| format!("JSON: {e}"))?;
-    let rest = &glb[20 + json_len..];
-    let bin = if rest.is_empty() {
-        Vec::new()
-    } else {
-        let len = u32_at(rest, 0)? as usize;
-        if u32_at(rest, 4)? != 0x004E_4942 || !len.is_multiple_of(4) || rest.len() != 8 + len {
-            return Err("bad BIN chunk".into());
-        }
-        rest[8..].to_vec()
-    };
-
+    let (json, bin) = split_chunks(glb)?;
     // The `gltf` crate does not implement KHR_texture_basisu and rejects any
     // file that requires it; for those, load without its validation pass and
     // rely on the checks below.
@@ -801,71 +801,106 @@ pub fn check_glb(glb: &[u8]) -> Result<GlbSummary, String> {
     }
     .map_err(|e| format!("gltf crate rejected it: {e}"))?;
 
-    // Buffer views inside the buffer, accessors inside their views.
+    check_ranges(&doc, &bin)?;
+    check_indices(&doc, &bin)?;
+    check_animations(&doc, &bin)?;
+    check_hierarchy(&doc)?;
+    Ok(GlbSummary { json, bin })
+}
+
+/// Header and chunk framing; returns the parsed JSON and the BIN payload.
+fn split_chunks(glb: &[u8]) -> Result<(serde_json::Value, Vec<u8>), String> {
+    let len = |at| u32_at(glb, at).map(|n| n as usize);
+    if u32_at(glb, 0)? != 0x4654_6C67 || u32_at(glb, 4)? != 2 {
+        return Err("bad GLB header".into());
+    }
+    if len(8)? != glb.len() {
+        return Err("header length != file length".into());
+    }
+    let json_len = len(12)?;
+    if u32_at(glb, 16)? != 0x4E4F_534A || !json_len.is_multiple_of(4) {
+        return Err("bad JSON chunk".into());
+    }
+    let json_bytes = glb.get(20..20 + json_len).ok_or("JSON chunk truncated")?;
+    let json = serde_json::from_slice(json_bytes).map_err(|e| format!("JSON: {e}"))?;
+    let rest = &glb[20 + json_len..];
+    if rest.is_empty() {
+        return Ok((json, Vec::new()));
+    }
+    let bin_len = u32_at(rest, 0)? as usize;
+    if u32_at(rest, 4)? != 0x004E_4942 || !bin_len.is_multiple_of(4) || rest.len() != 8 + bin_len {
+        return Err("bad BIN chunk".into());
+    }
+    Ok((json, rest[8..].to_vec()))
+}
+
+/// Buffer views inside the buffer, accessors inside their views.
+fn check_ranges(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
     let declared = doc.buffers().next().map_or(0, |b| b.length());
     if declared > bin.len() {
         return Err(format!("buffer declares {declared} bytes, BIN has {}", bin.len()));
     }
-    for v in doc.views() {
-        if v.offset() + v.length() > declared {
-            return Err(format!("bufferView {} out of range", v.index()));
-        }
+    if let Some(v) = doc.views().find(|v| v.offset() + v.length() > declared) {
+        return Err(format!("bufferView {} out of range", v.index()));
     }
     for a in doc.accessors() {
         if a.count() == 0 {
             return Err(format!("accessor {} has count 0", a.index()));
         }
         let view = a.view().ok_or("sparse accessors are not emitted")?;
-        let need = a.offset() + a.count() * a.size();
-        if need > view.length() {
+        if a.offset() + a.count() * a.size() > view.length() {
             return Err(format!("accessor {} overruns its view", a.index()));
         }
     }
-    let read_f32 = |a: &gltf::Accessor<'_>| -> Vec<f32> {
-        let v = a.view().unwrap();
-        let start = v.offset() + a.offset();
-        bytemuck::pod_collect_to_vec(&bin[start..start + a.count() * a.size()])
-    };
+    Ok(())
+}
 
-    // Indices address existing vertices.
-    for mesh in doc.meshes() {
-        for p in mesh.primitives() {
-            let verts = p.get(&gltf::Semantic::Positions).ok_or("primitive without POSITION")?.count();
-            for (_, a) in p.attributes() {
-                if a.count() != verts {
-                    return Err("attribute counts differ within a primitive".into());
-                }
-            }
-            if let Some(idx) = p.indices() {
-                if idx.count() % 3 != 0 {
-                    return Err("index count is not a multiple of 3".into());
-                }
-                let v = idx.view().unwrap();
-                let start = v.offset() + idx.offset();
-                let ids: Vec<u32> = bytemuck::pod_collect_to_vec(&bin[start..start + idx.count() * 4]);
-                if let Some(bad) = ids.iter().find(|&&i| i as usize >= verts) {
-                    return Err(format!("index {bad} >= vertex count {verts}"));
-                }
-            }
+/// The bytes an accessor covers.
+fn accessor_bytes<'b>(a: &gltf::Accessor<'_>, bin: &'b [u8]) -> &'b [u8] {
+    let view = a.view().expect("checked by check_ranges");
+    let start = view.offset() + a.offset();
+    &bin[start..start + a.count() * a.size()]
+}
+
+/// Every primitive's attributes agree on the vertex count, and every index
+/// addresses one of those vertices.
+fn check_indices(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
+    for p in doc.meshes().flat_map(|m| m.primitives()) {
+        let verts = p.get(&gltf::Semantic::Positions).ok_or("primitive without POSITION")?.count();
+        if p.attributes().any(|(_, a)| a.count() != verts) {
+            return Err("attribute counts differ within a primitive".into());
+        }
+        let Some(idx) = p.indices() else { continue };
+        if idx.count() % 3 != 0 {
+            return Err("index count is not a multiple of 3".into());
+        }
+        let ids: Vec<u32> = bytemuck::pod_collect_to_vec(accessor_bytes(&idx, bin));
+        if let Some(bad) = ids.iter().find(|&&i| i as usize >= verts) {
+            return Err(format!("index {bad} >= vertex count {verts}"));
         }
     }
+    Ok(())
+}
 
-    // Animation input: finite, strictly increasing.
+/// Sampler input is finite and strictly increasing, with one output per input.
+fn check_animations(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
     for anim in doc.animations() {
-        for s in anim.samplers() {
-            let t = read_f32(&s.input());
-            if t.iter().any(|v| !v.is_finite()) || t.windows(2).any(|w| w[0] >= w[1]) {
+        for sampler in anim.samplers() {
+            let times: Vec<f32> = bytemuck::pod_collect_to_vec(accessor_bytes(&sampler.input(), bin));
+            if times.iter().any(|t| !t.is_finite()) || times.windows(2).any(|w| w[0] >= w[1]) {
                 return Err(format!("animation '{}' has non-increasing input", anim.name().unwrap_or("")));
             }
-            let out = s.output();
-            if out.count() != s.input().count() {
+            if sampler.output().count() != sampler.input().count() {
                 return Err("sampler input/output count mismatch".into());
             }
         }
     }
+    Ok(())
+}
 
-    // Nodes form a forest: every node has at most one parent, no cycles, and
-    // scene roots are parentless.
+/// Nodes form a forest: every node has at most one parent, no cycles, scene
+/// roots are parentless, and each skin has one IBM per joint.
+fn check_hierarchy(doc: &gltf::Gltf) -> Result<(), String> {
     let n = doc.nodes().count();
     let mut parent = vec![None; n];
     for node in doc.nodes() {
@@ -876,28 +911,24 @@ pub fn check_glb(glb: &[u8]) -> Result<GlbSummary, String> {
         }
     }
     for start in 0..n {
-        let (mut at, mut steps) = (start, 0);
-        while let Some(p) = parent[at] {
-            at = p;
-            steps += 1;
-            if steps > n {
-                return Err(format!("cycle through node {start}"));
+        let mut at = start;
+        for _ in 0..=n {
+            match parent[at] {
+                Some(p) => at = p,
+                None => break,
             }
+        }
+        if parent[at].is_some() {
+            return Err(format!("cycle through node {start}"));
         }
     }
-    for scene in doc.scenes() {
-        for root in scene.nodes() {
-            if parent[root.index()].is_some() {
-                return Err(format!("scene root {} has a parent", root.index()));
-            }
-        }
+    if let Some(root) = doc.scenes().flat_map(|s| s.nodes()).find(|r| parent[r.index()].is_some()) {
+        return Err(format!("scene root {} has a parent", root.index()));
     }
     for skin in doc.skins() {
-        if let Some(ibm) = skin.inverse_bind_matrices()
-            && ibm.count() != skin.joints().count() {
-                return Err("IBM count != joint count".into());
-            }
+        if skin.inverse_bind_matrices().is_some_and(|ibm| ibm.count() != skin.joints().count()) {
+            return Err("IBM count != joint count".into());
+        }
     }
-
-    Ok(GlbSummary { json, bin })
+    Ok(())
 }

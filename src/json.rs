@@ -38,8 +38,8 @@ pub(crate) fn num(v: f32) -> String {
     if !v.is_finite() {
         return "0".to_owned();
     }
-    if v == v.trunc() && v.abs() < 1e9 {
-        // Exact: an integral f32 below 1e9 converts to i64 without loss.
+    if v.fract() == 0.0 && v.abs() < 1e9 {
+        #[expect(clippy::cast_possible_truncation, reason = "integral and below 1e9: exact in i64")]
         return format!("{}", v as i64);
     }
     format!("{v}")
@@ -50,7 +50,8 @@ pub(crate) fn num64(v: f64) -> String {
     if !v.is_finite() {
         return "0".to_owned();
     }
-    if v == v.trunc() && v.abs() < 1e15 {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        #[expect(clippy::cast_possible_truncation, reason = "integral and below 1e15: exact in i64")]
         return format!("{}", v as i64);
     }
     format!("{v}")

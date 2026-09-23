@@ -6,6 +6,8 @@
 //! M3_CORPUS=/path/to/extracted cargo test --release --test corpus -- --ignored --nocapture
 //! ```
 
+#![allow(clippy::print_stderr, reason = "the corpus report is this test's output")]
+
 mod common;
 
 use rayon::prelude::*;
@@ -40,13 +42,12 @@ fn real_models_convert_to_valid_glb() {
         .par_iter()
         .map(|p| {
             let r = std::fs::read(p).map_err(|e| e.to_string()).and_then(|bytes| {
-                match m3_to_glb::Converter::new().convert(&bytes) {
-                    Ok(glb) => common::check_glb(&glb.bytes).map(drop).map_err(|e| format!("INVALID: {e}")),
-                    // Rejecting a file is allowed; emitting a broken one is not.
-                    Err(_) => {
-                        rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        Ok(())
-                    }
+                // Rejecting a file is allowed; emitting a broken one is not.
+                if let Ok(glb) = m3_to_glb::Converter::new().convert(&bytes) {
+                    common::check_glb(&glb.bytes).map(drop).map_err(|e| format!("INVALID: {e}"))
+                } else {
+                    rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Ok(())
                 }
             });
             (p.clone(), r)

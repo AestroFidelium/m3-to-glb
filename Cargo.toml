@@ -110,9 +110,21 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 rust_2018_idioms = { level = "warn", priority = -1 }
 
 [lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Selected `restriction` lints.
+allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
 todo = "warn"
 undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+# Pedantic lints that argue with the domain rather than the code:
+# M3 stores times as i32 milliseconds and counts as u32, and glTF wants f32 —
+# the precision cast is the conversion itself, not an accident.
+cast_precision_loss = "allow"
+# `nx`/`ny`/`nz`, `tx`/`ty`/`tz`: vector components are named alike on purpose.
+similar_names = "allow"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Release: maximum optimisation

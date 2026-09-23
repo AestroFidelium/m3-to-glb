@@ -5,6 +5,8 @@
 //! asserts on what the glTF says — material modes, skin layout, animation
 //! channels, effect nodes. Nothing here needs a Blizzard asset.
 
+#![allow(clippy::float_cmp, reason = "asserting values the converter copies through or writes as constants")]
+
 mod common;
 
 use bytemuck::Zeroable;
@@ -22,6 +24,11 @@ fn convert_with(spec: &ModelSpec, c: &Converter<'_>) -> GlbSummary {
     check_glb(&glb.bytes).unwrap_or_else(|e| panic!("invalid GLB: {e}"))
 }
 
+/// A JSON index as `usize`.
+fn at(v: &Value) -> usize {
+    usize::try_from(v.as_u64().unwrap_or_else(|| panic!("not an index: {v}"))).unwrap()
+}
+
 fn f(v: &Value) -> f64 {
     v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
 }
@@ -33,9 +40,9 @@ fn quad_converts_to_one_indexed_primitive() {
     let g = convert(&ModelSpec::quad());
     assert_eq!(g.count("meshes"), 1);
     let prim = &g.json["meshes"][0]["primitives"][0];
-    let idx = &g.json["accessors"][prim["indices"].as_u64().unwrap() as usize];
+    let idx = &g.json["accessors"][at(&prim["indices"])];
     assert_eq!(idx["count"], 6);
-    let pos = &g.json["accessors"][prim["attributes"]["POSITION"].as_u64().unwrap() as usize];
+    let pos = &g.json["accessors"][at(&prim["attributes"]["POSITION"])];
     assert_eq!(pos["count"], 4);
     // Z-up → Y-up: the quad lies in M3's XY plane, so glTF Z spans -1..0.
     assert_eq!(f(&pos["min"][2]), -1.0);
@@ -76,7 +83,7 @@ fn out_of_range_triangles_are_dropped() {
     spec.faces = vec![0, 1, 2, 0, 2, 99];
     let g = convert(&spec);
     let prim = &g.json["meshes"][0]["primitives"][0];
-    assert_eq!(g.json["accessors"][prim["indices"].as_u64().unwrap() as usize]["count"], 3);
+    assert_eq!(g.json["accessors"][at(&prim["indices"])]["count"], 3);
 }
 
 #[test]
@@ -320,7 +327,7 @@ fn texture_dir(names: &[&str]) -> tempfile::TempDir {
     let sub = dir.path().join("Assets").join("Textures");
     std::fs::create_dir_all(&sub).unwrap();
     for name in names {
-        let img = image::RgbaImage::from_fn(8, 4, |x, y| image::Rgba([x as u8 * 30, y as u8 * 60, 0, 255]));
+        let img = image::RgbaImage::from_fn(8, 4, |x, y| image::Rgba([u8::try_from(x * 30).unwrap(), u8::try_from(y * 60).unwrap(), 0, 255]));
         img.save(sub.join(name)).unwrap();
     }
     std::fs::write(sub.join("notes.txt"), "not a texture").unwrap();
@@ -350,7 +357,10 @@ fn textures_are_found_by_stem_and_embedded_once() {
     spec.batches.push(BatchSpec { region: 1, matm: 1, bone: -1 });
     spec.matms.push((1, 1));
 
-    let g = convert_with(&spec, &Converter::new().textures(&cache).max_texture_size(4));
+    let converter = Converter::new().textures(&cache).max_texture_size(4);
+    // Stats count what was embedded, not what the folder holds.
+    assert_eq!(converter.convert(&spec.build()).unwrap().stats.textures, 4);
+    let g = convert_with(&spec, &converter);
     assert_eq!(g.count("images"), 4);
     assert_eq!(g.count("materials"), 2);
     let m = &g.json["materials"][0];
@@ -487,7 +497,7 @@ fn bone_tracks_become_gltf_animations() {
     let paths: Vec<&str> = stand["channels"].as_array().unwrap().iter().map(|c| c["target"]["path"].as_str().unwrap()).collect();
     assert_eq!(paths, ["translation", "rotation", "scale", "translation"]);
     // The duplicate 500 ms key keeps the later sample; 4 keys → 3 times.
-    let input = &g.json["accessors"][stand["samplers"][0]["input"].as_u64().unwrap() as usize];
+    let input = &g.json["accessors"][at(&stand["samplers"][0]["input"])];
     assert_eq!(input["count"], 3);
 }
 
@@ -686,8 +696,8 @@ fn small_textures_pass_through_a_resize_limit_untouched() {
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let raw = std::fs::read(dir.path().join("Assets/Textures/quad_diff.png")).unwrap();
     let g = convert_with(&ModelSpec::quad(), &Converter::new().textures(&cache).max_texture_size(64));
-    let view = &g.json["bufferViews"][g.json["images"][0]["bufferView"].as_u64().unwrap() as usize];
-    assert_eq!(view["byteLength"].as_u64().unwrap() as usize, raw.len());
+    let view = &g.json["bufferViews"][at(&g.json["images"][0]["bufferView"])];
+    assert_eq!(at(&view["byteLength"]), raw.len());
 }
 
 #[test]

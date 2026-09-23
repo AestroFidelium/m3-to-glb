@@ -9,7 +9,7 @@ cargo build                  # debug build
 cargo build --release        # optimized build (LTO, single CGU, mimalloc)
 cargo run -- <input.m3>      # convert with auto-derived output path
 cargo run -- <input.m3> -o out.glb -t ./textures -v debug
-cargo clippy --all-targets --all-features -- -D warnings   # CI gate, must be clean
+cargo clippy --all-targets --all-features -- -D warnings   # CI gate: pedantic + restriction picks, must be clean
 cargo test --all-features                                  # unit + integration + bolero replay
 cargo bolero test --profile fuzz fuzz_whole_pipeline -T 5min   # real libFuzzer run
 M3_CORPUS=/mnt/Projects/StarCraftExtracted/out cargo test --release --test corpus -- --ignored
@@ -52,8 +52,12 @@ feature (default) gates clap, mimalloc, memmap2 and the terminal logger.
 | `src/fx/mod.rs` | `collect()` — `PAR_`/`LITE`/`PROJ` → effect nodes + `extras` JSON (see `docs/fx-extras.md`) |
 | `src/attach.rs` | `collect()` — `ATT_`/`ATVL` → `m3attach` extras on the bone node (see `docs/attachments.md`) |
 | `src/fx/curves.rs` | `FxCurves` — emitter tracks resolved out of `STC_` (rate, burst, speed, …) |
-| `src/glb/mod.rs` | Binary GLB assembler, material alpha/double-sided logic |
-| `src/glb/json_builder.rs` | glTF JSON manifest builder |
+| `src/glb/mod.rs` | `pack()` orchestration, mesh accessors, GLB framing |
+| `src/glb/buffers.rs` | BIN buffer / views / accessors; `Images` (dedup cache, KTX2 fallback) |
+| `src/glb/materials.rs` | MAT_ / MADD → glTF materials, effect material summaries, MADD suffix slots |
+| `src/glb/scene.rs` | bone nodes + attachments, effect nodes, skin/IBM math, mesh nodes, armature |
+| `src/glb/animation.rs` | clips → samplers/channels |
+| `src/glb/json_builder.rs` | glTF JSON manifest (`Document` → one writer per section) |
 | `src/assets/mod.rs` | `TextureCache` — xxh3-hashed filename index, path normalisation |
 | `tests/common/mod.rs` | `ModelSpec` synthetic M3 writer + `check_glb` oracle (gltf crate + range/forest checks) |
 | `tests/fuzz_pipeline.rs` | structure-aware bolero target: `FuzzModel` → M3 bytes → corrupt → convert → oracle |

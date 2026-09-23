@@ -1,4 +1,4 @@
-//! M3 format parser (StarCraft II / Heroes of the Storm).
+//! M3 format parser (`StarCraft` II / Heroes of the Storm).
 //!
 //! # Architecture
 //!
@@ -28,6 +28,10 @@ pub use reader::{M3File, layr_record_size, layr_uv_tiling_offset, mat_record_siz
 use anyhow::{bail, Result};
 
 /// Parse an M3 file from an mmap buffer. Zero-copy — no allocations.
+///
+/// # Errors
+///
+/// The magic is not MD32/MD33/MD34, or the tag table does not fit in (or is misaligned within) `data`.
 pub fn parse(data: &[u8]) -> Result<M3File<'_>> {
     reader::M3File::from_bytes(data)
 }
@@ -35,9 +39,9 @@ pub fn parse(data: &[u8]) -> Result<M3File<'_>> {
 // ─── Magic-byte constants ────────────────────────────────────────────────────
 // Magic is stored as little-endian u32, so the bytes are reversed:
 //   "MD34" as a string → on disk: b"43DM"
-/// On-disk magic of an MD34 file (StarCraft II, Heroes of the Storm).
+/// On-disk magic of an MD34 file (`StarCraft` II, Heroes of the Storm).
 pub const MAGIC_MD34: [u8; 4] = *b"43DM";
-/// On-disk magic of an MD33 file (early StarCraft II betas).
+/// On-disk magic of an MD33 file (early `StarCraft` II betas).
 pub const MAGIC_MD33: [u8; 4] = *b"33DM";
 /// On-disk magic of an MD32 file.
 pub const MAGIC_MD32: [u8; 4] = *b"23DM";
@@ -45,18 +49,20 @@ pub const MAGIC_MD32: [u8; 4] = *b"23DM";
 /// Inspect the magic bytes at the start of the file.
 /// M3 stores tag IDs as little-endian u32 — the bytes are byte-reversed
 /// relative to the ASCII spelling.
+///
+/// # Errors
+///
+/// `data` is shorter than four bytes or does not start with an M3 magic.
 pub fn detect_version(data: &[u8]) -> Result<M3Version> {
     if data.len() < 4 {
         bail!("file too small to be M3 (< 4 bytes)");
     }
     match &data[..4] {
-        b"43DM" => Ok(M3Version::Md34), // "MD34" LE — most common
-        b"33DM" => Ok(M3Version::Md33), // "MD33" LE
-        b"23DM" => Ok(M3Version::Md32), // "MD32" LE
-        // Accept the natural byte order as well, just in case.
-        b"MD34" => Ok(M3Version::Md34),
-        b"MD33" => Ok(M3Version::Md33),
-        b"MD32" => Ok(M3Version::Md32),
+        // On disk the magic is byte-reversed ("MD34" → "43DM"); the natural
+        // order is accepted as well, just in case.
+        b"43DM" | b"MD34" => Ok(M3Version::Md34),
+        b"33DM" | b"MD33" => Ok(M3Version::Md33),
+        b"23DM" | b"MD32" => Ok(M3Version::Md32),
         other => bail!(
             "unknown magic: {:?} (expected MD34/MD33/MD32 in LE)",
             std::str::from_utf8(other).unwrap_or("?")
@@ -71,6 +77,6 @@ pub enum M3Version {
     Md32,
     /// `MD33`.
     Md33,
-    /// `MD34` — every shipping StarCraft II / Heroes of the Storm model.
+    /// `MD34` — every shipping `StarCraft` II / Heroes of the Storm model.
     Md34,
 }

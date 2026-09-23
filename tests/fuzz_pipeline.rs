@@ -211,6 +211,15 @@ impl FuzzModel {
             atvl_version: pick(&[0, 1], v[8]),
             ..ModelSpec::default()
         };
+        self.geometry(&mut spec);
+        self.skeleton(&mut spec);
+        self.materials(&mut spec);
+        self.anims.apply(&mut spec);
+        self.effects(&mut spec);
+        spec
+    }
+
+    fn geometry(&self, spec: &mut ModelSpec) {
         spec.vertices = self
             .vertices
             .iter()
@@ -248,6 +257,9 @@ impl FuzzModel {
             .take(6)
             .map(|&(region, matm, bone)| BatchSpec { region: u16::from(region % 6), matm: u16::from(matm % 8), bone: i16::from(bone) })
             .collect();
+    }
+
+    fn skeleton(&self, spec: &mut ModelSpec) {
         spec.bone_lookup = self.bone_lookup.iter().take(16).map(|&b| u16::from(b % 20)).collect();
         spec.bones = self
             .bones
@@ -263,6 +275,9 @@ impl FuzzModel {
                 batching: (u16::from(b.batching.0), u32::from(b.batching.1), u32::from(b.batching.2 % 2)),
             })
             .collect();
+    }
+
+    fn materials(&self, spec: &mut ModelSpec) {
         spec.materials = self
             .materials
             .iter()
@@ -290,8 +305,9 @@ impl FuzzModel {
             .map(|&(t, i)| (pick(&[1, 1, 3, 12, 2, 0], t), u32::from(i % 6)))
             .collect();
         spec.composites = self.composites.iter().take(3).map(|s| s.iter().take(3).map(|&i| u32::from(i % 9)).collect()).collect();
-        self.anims.apply(&mut spec);
+    }
 
+    fn effects(&self, spec: &mut ModelSpec) {
         let bone = |b: u8| b % 14; // mostly in range, sometimes past the end
         spec.particles = self
             .particles
@@ -318,7 +334,6 @@ impl FuzzModel {
             .take(3)
             .map(|(b, raw)| Atvl { bone0: u32::from(bone(*b)), ..pod_from::<Atvl>(raw) })
             .collect();
-        spec
     }
 
     fn m3a(&self) -> Option<Vec<u8>> {

@@ -1,4 +1,4 @@
-//! Binary structs of the M3 format (StarCraft 2 / Blizzard).
+//! Binary structs of the M3 format (`StarCraft` 2 / Blizzard).
 //!
 //! Generated from structures.xml (SC2Mapster/m3addon).
 //!
@@ -12,10 +12,12 @@
 //!   are absent from the primary (highest supported) version.
 //! - Versioned structs come with aliases like `pub type Bone = BoneV1;`.
 
-#![allow(dead_code, non_snake_case)]
-// Field names mirror `structures.xml` one to one; the file is the reference
-// for what each one means, and repeating it per field would be noise.
-#![allow(missing_docs)]
+#![allow(
+    dead_code,
+    missing_docs,
+    reason = "a complete map of the format: most records are not converted yet, \
+              and field names mirror structures.xml, which documents them"
+)]
 
 use bytemuck::{Pod, Zeroable};
 
@@ -165,7 +167,7 @@ pub struct Reference {
     pub flags:   u32,
 }
 
-/// SmallReference — Reference without the flags field (used in MD33).
+/// `SmallReference` — Reference without the flags field (used in MD33).
 /// version 0, size 8
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -174,7 +176,7 @@ pub struct SmallReference {
     pub index:   u32,
 }
 
-/// Vector3As3uint8 — 3-byte vector; `i / 255.0 → float`.
+/// `Vector3As3uint8` — 3-byte vector; `i / 255.0 → float`.
 /// version 0, size 3
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -184,7 +186,7 @@ pub struct Vector3As3uint8 {
     pub z: u8,
 }
 
-/// Vector2As2int16 — int16 vector; `i / 2048.0 → float`.
+/// `Vector2As2int16` — int16 vector; `i / 2048.0 → float`.
 /// version 0, size 4
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -229,12 +231,12 @@ pub struct Bnds {
 ///   +0   name           Reference   12
 ///   +12  id             i32          4   (default -1)
 ///   +16  bone           i16          2   (default -1)
-///   +18  bone_fb        u16          2
+///   +18  `bone_fb`        u16          2
 ///   +20  matrix         Matrix44    64
 ///   +84  flags          u32          4   (default 4)
 ///   +88  payload        Reference   12
-///   +100 data_param0    u32          4   (since_version 1)
-///   +104 data_param1    u32          4   (since_version 2)
+///   +100 `data_param0`    u32          4   (`since_version` 1)
+///   +104 `data_param1`    u32          4   (`since_version` 2)
 ///   = 108
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -256,7 +258,7 @@ pub type Evnt = EvntV2;
 //  ANIMATION REFERENCE HEADER AND TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// AnimationReferenceHeader — animation reference header.
+/// `AnimationReferenceHeader` — animation reference header.
 /// interpolation: 0=constant, 1=linear
 /// flags: 6 = valid reference, 0 = empty.
 /// version 0, size 8
@@ -268,7 +270,7 @@ pub struct AnimationReferenceHeader {
     pub id:            u32,
 }
 
-/// Vector3AnimationReference — animated vec3.
+/// `Vector3AnimationReference` — animated vec3.
 /// version 0, size 36
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -279,7 +281,7 @@ pub struct Vector3AnimationReference {
     pub unused:  i32,
 }
 
-/// Vector2AnimationReference — animated vec2.
+/// `Vector2AnimationReference` — animated vec2.
 /// version 0, size 28
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -290,7 +292,7 @@ pub struct Vector2AnimationReference {
     pub unused:  i32,
 }
 
-/// QuaternionAnimationReference — animated quaternion.
+/// `QuaternionAnimationReference` — animated quaternion.
 /// version 0, size 44
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -301,7 +303,7 @@ pub struct QuaternionAnimationReference {
     pub unused:  i32,
 }
 
-/// UInt32AnimationReference — animated u32.
+/// `UInt32AnimationReference` — animated u32.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -312,7 +314,7 @@ pub struct UInt32AnimationReference {
     pub unused:  i32,
 }
 
-/// UInt16AnimationReference — animated u16.
+/// `UInt16AnimationReference` — animated u16.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -323,7 +325,7 @@ pub struct UInt16AnimationReference {
     pub unused:  i32,
 }
 
-/// Int16AnimationReference — animated i16.
+/// `Int16AnimationReference` — animated i16.
 /// version 0, size 16
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -334,7 +336,7 @@ pub struct Int16AnimationReference {
     pub unused:  i32,
 }
 
-/// FloatAnimationReference — animated f32.
+/// `FloatAnimationReference` — animated f32.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -345,7 +347,7 @@ pub struct FloatAnimationReference {
     pub unused:  i32,
 }
 
-/// ColorAnimationReference — animated COL colour.
+/// `ColorAnimationReference` — animated COL colour.
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -356,7 +358,7 @@ pub struct ColorAnimationReference {
     pub unused:  i32,
 }
 
-/// FlagAnimationReference — animated boolean flag (stored as u32).
+/// `FlagAnimationReference` — animated boolean flag (stored as u32).
 /// version 0, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -367,7 +369,7 @@ pub struct FlagAnimationReference {
     pub unused:  i32,
 }
 
-/// BNDSAnimationReference — animated bounding volume.
+/// `BNDSAnimationReference` — animated bounding volume.
 /// version 0, size 68
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -452,11 +454,11 @@ sd_block!(Sdmb, "SDMB — BNDS keyframes.");
 ///   +0    name            Reference  12
 ///   +12   concurrent      u16         2
 ///   +14   priority        u16         2
-///   +16   sts_index       u16         2
-///   +18   sts_index_fb    u16         2
-///   +20   anim_ids        Reference  12
-///   +32   anim_refs       Reference  12
-///   +44   ref_count       u32         4
+///   +16   `sts_index`       u16         2
+///   +18   `sts_index_fb`    u16         2
+///   +20   `anim_ids`        Reference  12
+///   +32   `anim_refs`       Reference  12
+///   +44   `ref_count`       u32         4
 ///   +48   sdev            Reference  12
 ///   +60   sd2v            Reference  12
 ///   +72   sd3v            Reference  12
@@ -510,16 +512,16 @@ pub type Stc = StcV4;
 ///   +0   id              i32    4   (default -1)
 ///   +4   index           i32    4   (default -1)
 ///   +8   name            Ref   12
-///   +20  anim_ms_start   u32    4
-///   +24  anim_ms_end     u32    4
-///   +28  movement_speed  f32    4
+///   +20  `anim_ms_start`   u32    4
+///   +24  `anim_ms_end`     u32    4
+///   +28  `movement_speed`  f32    4
 ///   +32  flags           u32    4
 ///   +36  frequency       u32    4
-///   +40  replay_start    u32    4   (default 1)
-///   +44  replay_end      u32    4   (default 1)
-///   +48  ms_blend        u32    4   (default 100)
-///   +52  bounding_sphere Bnds  28
-///   +80  anim_sets       Ref   12
+///   +40  `replay_start`    u32    4   (default 1)
+///   +44  `replay_end`      u32    4   (default 1)
+///   +48  `ms_blend`        u32    4   (default 100)
+///   +52  `bounding_sphere` Bnds  28
+///   +80  `anim_sets`       Ref   12
 ///   = 92
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -578,7 +580,7 @@ pub struct Stg {
 //  BSET — ANIM SET DATA
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// BSET — SAnimSetData (replaces SBonesetData).
+/// BSET — `SAnimSetData` (replaces `SBonesetData`).
 /// version 0, size 32
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -620,10 +622,10 @@ pub struct Sts {
 ///   +16   flags       u32                             4
 ///   +20   parent      i16  (default -1)               2
 ///   +22   s1          u16                             2
-///   +24   location    Vector3AnimationReference      36
-///   +60   rotation    QuaternionAnimationReference   44
-///   +104  scale       Vector3AnimationReference      36
-///   +140  batching    FlagAnimationReference         20
+///   +24   location    `Vector3AnimationReference`      36
+///   +60   rotation    `QuaternionAnimationReference`   44
+///   +104  scale       `Vector3AnimationReference`      36
+///   +140  batching    `FlagAnimationReference`         20
 ///   = 160
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -675,20 +677,20 @@ pub struct Iref {
 ///
 ///   +0   id                      u32  4
 ///   +4   unknown01                u32  4  (since v3)
-///   +8   first_vertex_index       u32  4  (since v3)
-///   +12  vertex_count             u32  4  (since v3)
-///   +16  first_face_index         u32  4
-///   +20  face_count               u32  4
-///   +24  bone_count               u16  2
-///   +26  first_bone_lookup_index  u16  2
-///   +28  bone_lookup_count        u16  2
+///   +8   `first_vertex_index`       u32  4  (since v3)
+///   +12  `vertex_count`             u32  4  (since v3)
+///   +16  `first_face_index`         u32  4
+///   +20  `face_count`               u32  4
+///   +24  `bone_count`               u16  2
+///   +26  `first_bone_lookup_index`  u16  2
+///   +28  `bone_lookup_count`        u16  2
 ///   +30  unknown02                u16  2
-///   +32  vertex_lookups_used      u8   1
+///   +32  `vertex_lookups_used`      u8   1
 ///   +33  unknown04                u8   1  (default 1)
-///   +34  root_bone                u16  2
+///   +34  `root_bone`                u16  2
 ///   +36  flags                    u32  4  (since v4)
-///   +40  uv_multiply              f32  4  (since v5, default 16.0)
-///   +44  uv_offset                f32  4  (since v5, default 0.0)
+///   +40  `uv_multiply`              f32  4  (since v5, default 16.0)
+///   +44  `uv_offset`                f32  4  (since v5, default 0.0)
 ///   = 48
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -856,17 +858,17 @@ pub type Att = AttV1;
 ///   +0    shape            u16                      2
 ///   +2    bone             u16                      2
 ///   +4    flags            u32                      4
-///   +8    lod_cut          u32                      4
-///   +12   shadow_lod_cut   i32                      4
-///   +16   color            Vector3AnimationRef     36
-///   +52   intensity        FloatAnimationRef       20
-///   +72   spec_color       Vector3AnimationRef     36
-///   +108  spec_intensity   FloatAnimationRef       20
-///   +128  attenuation_far  FloatAnimationRef       20
+///   +8    `lod_cut`          u32                      4
+///   +12   `shadow_lod_cut`   i32                      4
+///   +16   color            `Vector3AnimationRef`     36
+///   +52   intensity        `FloatAnimationRef`       20
+///   +72   `spec_color`       `Vector3AnimationRef`     36
+///   +108  `spec_intensity`   `FloatAnimationRef`       20
+///   +128  `attenuation_far`  `FloatAnimationRef`       20
 ///   +148  unknown148       f32                      4
-///   +152  attenuation_near FloatAnimationRef       20
-///   +172  hotspot          FloatAnimationRef       20
-///   +192  falloff          FloatAnimationRef       20
+///   +152  `attenuation_near` `FloatAnimationRef`       20
+///   +172  hotspot          `FloatAnimationRef`       20
+///   +192  falloff          `FloatAnimationRef`       20
 ///   = 212
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -895,23 +897,23 @@ pub type Lite = LiteV7;
 
 /// PATU version 4, size 152
 ///
-///   +0    matrix_forward  Matrix44  64
-///   +64   quat_up0        Vec4      16
-///   +80   quat_up1        Vec4      16
+///   +0    `matrix_forward`  Matrix44  64
+///   +64   `quat_up0`        Vec4      16
+///   +80   `quat_up1`        Vec4      16
 ///   +96   bone            u16        2
 ///   +98   flags           u8         1
-///   +99   group_id        u8         1  (default 1)
-///   +100  yaw_flags       u32        4
-///   +104  yaw_min         f32        4
-///   +108  yaw_max         f32        4
-///   +112  yaw_weight      f32        4
-///   +116  pitch_flags     u32        4
-///   +120  pitch_min       f32        4
-///   +124  pitch_max       f32        4
-///   +128  pitch_weight    f32        4
+///   +99   `group_id`        u8         1  (default 1)
+///   +100  `yaw_flags`       u32        4
+///   +104  `yaw_min`         f32        4
+///   +108  `yaw_max`         f32        4
+///   +112  `yaw_weight`      f32        4
+///   +116  `pitch_flags`     u32        4
+///   +120  `pitch_min`       f32        4
+///   +124  `pitch_max`       f32        4
+///   +128  `pitch_weight`    f32        4
 ///   +132  unknown132      f32        4  (default 1.0)
 ///   +136  unknown136      f32        4  (default 1.0)
-///   +140  main_bone_offset Vec3     12
+///   +140  `main_bone_offset` Vec3     12
 ///   = 152
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -1063,37 +1065,37 @@ pub struct Mt32 {
 ///
 /// Layout:
 ///   +0    id                  u32                   4
-///   +4    color_bitmap        Reference            12   ← texture path
-///   +16   color_value         ColorAnimationRef    20
+///   +4    `color_bitmap`        Reference            12   ← texture path
+///   +16   `color_value`         `ColorAnimationRef`    20
 ///   +36   flags               u32                   4
-///   +40   uv_source           u32                   4
-///   +44   color_channels      u32                   4
-///   +48   color_multiply      FloatAnimationRef    20
-///   +68   color_add           FloatAnimationRef    20
-///   +88   noise_type          u32                   4
-///   +92   video_channel       i32                   4
-///   +96   video_frame_rate    u32                   4
-///   +100  video_frame_start   u32                   4
-///   +104  video_frame_end     i32                   4
-///   +108  video_mode          u32                   4
-///   +112  video_sync_timing   u32                   4
-///   +116  video_play          UInt32AnimationRef   20
-///   +136  video_restart       FlagAnimationRef     20
-///   +156  uv_flipbook_rows    u32                   4
-///   +160  uv_flipbook_cols    u32                   4
-///   +164  uv_flipbook_frame   UInt16AnimationRef   16
-///   +180  uv_offset           Vector2AnimationRef  28
-///   +208  uv_angle            Vector3AnimationRef  36
-///   +244  uv_tiling           Vector2AnimationRef  28
-///   +272  uv_w_translation    FloatAnimationRef    20
-///   +292  uv_w_scale          FloatAnimationRef    20
-///   +312  color_brightness    FloatAnimationRef    20
-///   +332  uv_source_related   i32                   4
-///   +336  fresnel_type        u32                   4
-///   +340  fresnel_exponent    f32                   4
-///   +344  fresnel_min         f32                   4
-///   +348  fresnel_max_offset  f32                   4
-///   +352  uv_density          f32                   4   (till_version 25)
+///   +40   `uv_source`           u32                   4
+///   +44   `color_channels`      u32                   4
+///   +48   `color_multiply`      `FloatAnimationRef`    20
+///   +68   `color_add`           `FloatAnimationRef`    20
+///   +88   `noise_type`          u32                   4
+///   +92   `video_channel`       i32                   4
+///   +96   `video_frame_rate`    u32                   4
+///   +100  `video_frame_start`   u32                   4
+///   +104  `video_frame_end`     i32                   4
+///   +108  `video_mode`          u32                   4
+///   +112  `video_sync_timing`   u32                   4
+///   +116  `video_play`          `UInt32AnimationRef`   20
+///   +136  `video_restart`       `FlagAnimationRef`     20
+///   +156  `uv_flipbook_rows`    u32                   4
+///   +160  `uv_flipbook_cols`    u32                   4
+///   +164  `uv_flipbook_frame`   `UInt16AnimationRef`   16
+///   +180  `uv_offset`           `Vector2AnimationRef`  28
+///   +208  `uv_angle`            `Vector3AnimationRef`  36
+///   +244  `uv_tiling`           `Vector2AnimationRef`  28
+///   +272  `uv_w_translation`    `FloatAnimationRef`    20
+///   +292  `uv_w_scale`          `FloatAnimationRef`    20
+///   +312  `color_brightness`    `FloatAnimationRef`    20
+///   +332  `uv_source_related`   i32                   4
+///   +336  `fresnel_type`        u32                   4
+///   +340  `fresnel_exponent`    f32                   4
+///   +344  `fresnel_min`         f32                   4
+///   +348  `fresnel_max_offset`  f32                   4
+///   +352  `uv_density`          f32                   4   (`till_version` 25)
 ///   = 356
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -1155,45 +1157,45 @@ pub struct Matm {
 ///
 /// Layout:
 ///   +0    name                      Reference  12
-///   +12   additional_flags          u32         4
+///   +12   `additional_flags`          u32         4
 ///   +16   flags                     u32         4
-///   +20   blend_mode                u32         4
+///   +20   `blend_mode`                u32         4
 ///   +24   priority                  i32         4
-///   +28   rtt_channels_used         u32         4
+///   +28   `rtt_channels_used`         u32         4
 ///   +32   specularity               f32         4
-///   +36   depth_blend_falloff       f32         4
-///   +40   alpha_test_threshold      u32         4
-///   +44   hdr_spec                  f32         4
-///   +48   hdr_emis                  f32         4
-///   +52   hdr_envi_const            f32         4   (since v20)
-///   +56   hdr_envi_diff             f32         4   (since v20)
-///   +60   hdr_envi_spec             f32         4   (since v20)
-///   +64   layer_diff                Reference  12
-///   +76   layer_decal               Reference  12
-///   +88   layer_spec                Reference  12
-///   +100  layer_gloss               Reference  12   (since v16)
-///   +112  layer_emis1               Reference  12
-///   +124  layer_emis2               Reference  12
-///   +136  layer_envi                Reference  12
-///   +148  layer_envi_mask           Reference  12
-///   +160  layer_alpha1              Reference  12
-///   +172  layer_alpha2              Reference  12
-///   +184  layer_norm                Reference  12
-///   +196  layer_height              Reference  12
-///   +208  layer_light               Reference  12
-///   +220  layer_ao                  Reference  12
-///   +232  layer_norm_blend1_mask    Reference  12   (since v19)
-///   +244  layer_norm_blend2_mask    Reference  12   (since v19)
-///   +256  layer_norm_blend1         Reference  12   (since v19)
-///   +268  layer_norm_blend2         Reference  12   (since v19)
-///   +280  material_class            u32         4
-///   +284  blend_mode_layer          u32         4
-///   +288  blend_mode_emis1          u32         4
-///   +292  blend_mode_emis2          u32         4
-///   +296  spec_mode                 u32         4
-///   +300  parallax_height           FloatAnimRef 20
-///   +320  motion_blur               FloatAnimRef 20
-///   +340  normal_blend_mask_factor  Reference  12   (since v19)
+///   +36   `depth_blend_falloff`       f32         4
+///   +40   `alpha_test_threshold`      u32         4
+///   +44   `hdr_spec`                  f32         4
+///   +48   `hdr_emis`                  f32         4
+///   +52   `hdr_envi_const`            f32         4   (since v20)
+///   +56   `hdr_envi_diff`             f32         4   (since v20)
+///   +60   `hdr_envi_spec`             f32         4   (since v20)
+///   +64   `layer_diff`                Reference  12
+///   +76   `layer_decal`               Reference  12
+///   +88   `layer_spec`                Reference  12
+///   +100  `layer_gloss`               Reference  12   (since v16)
+///   +112  `layer_emis1`               Reference  12
+///   +124  `layer_emis2`               Reference  12
+///   +136  `layer_envi`                Reference  12
+///   +148  `layer_envi_mask`           Reference  12
+///   +160  `layer_alpha1`              Reference  12
+///   +172  `layer_alpha2`              Reference  12
+///   +184  `layer_norm`                Reference  12
+///   +196  `layer_height`              Reference  12
+///   +208  `layer_light`               Reference  12
+///   +220  `layer_ao`                  Reference  12
+///   +232  `layer_norm_blend1_mask`    Reference  12   (since v19)
+///   +244  `layer_norm_blend2_mask`    Reference  12   (since v19)
+///   +256  `layer_norm_blend1`         Reference  12   (since v19)
+///   +268  `layer_norm_blend2`         Reference  12   (since v19)
+///   +280  `material_class`            u32         4
+///   +284  `blend_mode_layer`          u32         4
+///   +288  `blend_mode_emis1`          u32         4
+///   +292  `blend_mode_emis2`          u32         4
+///   +296  `spec_mode`                 u32         4
+///   +300  `parallax_height`           `FloatAnimRef` 20
+///   +320  `motion_blur`               `FloatAnimRef` 20
+///   +340  `normal_blend_mask_factor`  Reference  12   (since v19)
 ///   = 352
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -2135,7 +2137,7 @@ pub struct Srib {
 
 /// RIB_ version 9, size 760.
 ///
-/// ribbon_type: 0=PlanarBillboarded, 1=Planar, 2=Cylinder, 3=Star Shaped
+/// `ribbon_type`: 0=PlanarBillboarded, 1=Planar, 2=Cylinder, 3=Star Shaped
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct RibV9 {
@@ -2512,7 +2514,7 @@ pub struct Md34 {
     pub model:        Reference,
 }
 
-/// MD33 — M3 file header (SC2 Beta version, uses SmallReference).
+/// MD33 — M3 file header (SC2 Beta version, uses `SmallReference`).
 /// version 11, size 20
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -2524,7 +2526,7 @@ pub struct Md33 {
     pub model:        SmallReference,
 }
 
-/// MDIndexEntry — one entry in the file tag table.
+/// `MDIndexEntry` — one entry in the file tag table.
 /// Exists in versions 33 (MD33) and 34 (MD34).
 /// version 33/34, size 16
 #[repr(C)]
@@ -2543,6 +2545,7 @@ pub struct MdIndexEntry {
 impl MdIndexEntry {
     /// Return the tag as a byte slice.
     #[inline]
+    #[must_use]
     pub fn tag_bytes(&self) -> [u8; 4] {
         self.tag.to_le_bytes()
     }

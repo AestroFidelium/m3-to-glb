@@ -3,7 +3,7 @@
 //! Emitter fields in M3 are [`FloatAnimationReference`]-shaped: a static
 //! default plus an `anim_id` that the sequence data may drive. For particle
 //! systems the default alone is usually *not* what the effect looks like — a
-//! HotS ability effect commonly ships `emit_rate` default `0` and animates it
+//! `HotS` ability effect commonly ships `emit_rate` default `0` and animates it
 //! to a burst inside one sequence. Exporting only defaults would hand the
 //! engine an emitter that never spawns anything.
 //!
@@ -14,6 +14,8 @@
 //! for float and vec3 tracks instead of translation/rotation/scale.
 //!
 //! [`FloatAnimationReference`]: crate::m3::structures::FloatAnimationReference
+
+use std::fmt::Write as _;
 
 use crate::m3::reader::M3File;
 use crate::m3::structures::Reference;
@@ -58,6 +60,7 @@ struct SeqCurves {
 impl FxCurves {
     /// Resolve every sequence in the model. Cheap enough to do unconditionally:
     /// the SD blocks are already in the mmap and each is a pair of slices.
+    #[must_use]
     pub fn build(m3: &M3File<'_>) -> Self {
         let mut seqs = Vec::new();
         for stc in m3.sequence_collections().unwrap_or_default() {
@@ -108,11 +111,13 @@ impl FxCurves {
     }
 
     /// Whether anything at all was resolved.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.seqs.is_empty()
     }
 
     /// The float curve for `anim_id` in each sequence that drives it.
+    #[must_use]
     pub fn real(&self, anim_id: u32) -> Track<'_, f32> {
         if anim_id == 0 {
             return Vec::new();
@@ -131,6 +136,7 @@ impl FxCurves {
 
     /// The integer curve for `anim_id` in each sequence that drives it,
     /// widened to float. Used for counts, which M3 stores as 16-bit.
+    #[must_use]
     pub fn int(&self, anim_id: u32) -> Track<'_, f32> {
         if anim_id == 0 {
             return Vec::new();
@@ -149,6 +155,7 @@ impl FxCurves {
     }
 
     /// The vec3 curve for `anim_id` in each sequence that drives it.
+    #[must_use]
     pub fn vec3(&self, anim_id: u32) -> Track<'_, [f32; 3]> {
         if anim_id == 0 {
             return Vec::new();
@@ -205,7 +212,7 @@ pub fn real_json(curve: &[(f32, f32)]) -> String {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!("[{},{}]", crate::json::num(t), crate::json::num(v)));
+        let _ = write!(out, "[{},{}]", crate::json::num(t), crate::json::num(v));
     }
     out.push(']');
     out
@@ -219,13 +226,14 @@ pub fn vec3_json(curve: &[(f32, [f32; 3])]) -> String {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "[{},[{},{},{}]]",
             crate::json::num(t),
             crate::json::num(v[0]),
             crate::json::num(v[1]),
             crate::json::num(v[2])
-        ));
+        );
     }
     out.push(']');
     out

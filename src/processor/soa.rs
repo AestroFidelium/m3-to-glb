@@ -1,4 +1,4 @@
-//! Mesh data in SoA (Structure of Arrays) form.
+//! Mesh data in `SoA` (Structure of Arrays) form.
 //!
 //! Each field is a dense single-type array. Both SIMD and rayon work most
 //! efficiently against dense arrays.
@@ -13,11 +13,11 @@ pub struct RegionPrimitiveInfo {
     pub index_count: usize,
     /// Index into the MATM array (`material_references` in MODL).
     /// glb/mod.rs reads `matm[idx].mat_type` to dispatch to MAT_ or MADD.
-    /// `None` — material type is unsupported (mat_type ∉ {1, 12}).
+    /// `None` — material type is unsupported (`mat_type` ∉ {1, 12}).
     pub material_index: Option<usize>,
 }
 
-/// SoA mesh data. Ready to be written straight into the GLB buffer.
+/// `SoA` mesh data. Ready to be written straight into the GLB buffer.
 ///
 /// # Invariants
 ///
@@ -58,14 +58,14 @@ pub struct MeshDataSoA {
     pub uvs_v: Vec<f32>,
 
     // ── Skinning ────────────────────────────────────────────────────────────
-    /// JOINTS_0 attribute: 4 bone indices per vertex (into the skin joints array).
+    /// `JOINTS_0` attribute: 4 bone indices per vertex (into the skin joints array).
     /// u16 to support models with > 255 bones.
     pub joints: Vec<[u16; 4]>,
-    /// WEIGHTS_0 attribute: 4 weights per vertex as normalised uint8 (0..255).
+    /// `WEIGHTS_0` attribute: 4 weights per vertex as normalised uint8 (0..255).
     /// We mark `normalized = true` on output → the shader divides by 255.
     pub weights: Vec<[u8; 4]>,
-    /// True when the mesh is skinned (skin0/skin1 set in vertex_flags). When
-    /// false, joints/weights are empty and primitives carry no JOINTS_0/WEIGHTS_0.
+    /// True when the mesh is skinned (skin0/skin1 set in `vertex_flags`). When
+    /// false, joints/weights are empty and primitives carry no `JOINTS_0/WEIGHTS_0`.
     pub has_skin: bool,
 
     // ── Triangles ───────────────────────────────────────────────────────────
@@ -88,6 +88,7 @@ pub struct MeshDataSoA {
 
 impl MeshDataSoA {
     /// An empty mesh with an inverted (empty) bounding box.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             aabb_min: [f32::MAX; 3],
@@ -118,12 +119,14 @@ impl MeshDataSoA {
 
     /// Vertex count.
     #[inline]
+    #[must_use]
     pub fn vertex_count(&self) -> usize {
         self.positions_x.len()
     }
 
     /// Triangle count.
     #[inline]
+    #[must_use]
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
@@ -168,21 +171,24 @@ impl MeshDataSoA {
         self.aabb_max = new_max;
     }
 
-    /// Joints (UNSIGNED_SHORT VEC4) → bytes for the GLB buffer.
+    /// Joints (`UNSIGNED_SHORT` VEC4) → bytes for the GLB buffer.
+    #[must_use]
     pub fn joints_as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.joints)
     }
 
-    /// Weights (UNSIGNED_BYTE VEC4 normalised) → bytes for the GLB buffer.
+    /// Weights (`UNSIGNED_BYTE` VEC4 normalised) → bytes for the GLB buffer.
+    #[must_use]
     pub fn weights_as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.weights)
     }
 
-    /// Convert SoA back to AoS for the GLB write phase.
+    /// Convert `SoA` back to `AoS` for the GLB write phase.
     ///
     /// GLB stores attributes in interleaved form, so we reinterleave at the
     /// final write step. `bytemuck::cast_slice` lets us emit the f32 arrays
     /// directly without per-element work.
+    #[must_use]
     pub fn positions_as_bytes(&self) -> Vec<u8> {
         // interleaved XYZ
         let mut out = Vec::with_capacity(self.vertex_count() * 12);
@@ -195,6 +201,7 @@ impl MeshDataSoA {
     }
 
     /// Normals as interleaved little-endian `[f32; 3]`.
+    #[must_use]
     pub fn normals_as_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 12);
         for i in 0..self.vertex_count() {
@@ -206,12 +213,14 @@ impl MeshDataSoA {
     }
 
     /// UVs as interleaved little-endian `[f32; 2]`.
+    #[must_use]
     pub fn uvs_as_bytes(&self) -> Vec<u8> {
         self.uvs_as_bytes_scaled(1.0, 1.0)
     }
 
     /// UVs scaled by `uv_tiling` from the material.
     /// In M3: `uv_final = uv_raw * tiling` (multiply, not divide).
+    #[must_use]
     pub fn uvs_as_bytes_scaled(&self, tiling_u: f32, tiling_v: f32) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 8);
         for i in 0..self.vertex_count() {
@@ -224,6 +233,7 @@ impl MeshDataSoA {
     }
 
     /// Tangents as VEC4 (xyzw) — glTF requires 4 components, w is the bitangent sign.
+    #[must_use]
     pub fn tangents_as_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.vertex_count() * 16);
         for i in 0..self.vertex_count() {

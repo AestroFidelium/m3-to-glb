@@ -50,7 +50,7 @@ fn fake_toktx(dir: &std::path::Path, mode: &str) {
     let body = match mode {
         "ok" => "for a; do out=$prev; prev=$a; done; cp \"$prev\" \"$out\"",
         "fail" => "exit 3",
-        "noexec" => "exit 0",
+        // "silent" (and "noexec", which differs only in its permissions).
         _ => "exit 0",
     };
     let path = dir.join("toktx");
