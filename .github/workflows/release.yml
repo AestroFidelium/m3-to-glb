@@ -46,7 +46,30 @@ jobs:
             cp target/${{ matrix.target }}/release/m3-to-glb "$name"/
             tar czf "$name.tar.gz" "$name"
           fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: m3-to-glb-*.${{ matrix.archive }}
+
+  # One release, created once, after every platform has built. The notes are
+  # this version's section of CHANGELOG.md.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            /^## \[/ { if (on) exit; on = index($0, "[" v "]") > 0; next }
+            on
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "no CHANGELOG section for $version"; exit 1; }
       - uses: softprops/action-gh-release@v3
         with:
-          files: m3-to-glb-*.${{ matrix.archive }}
-          generate_release_notes: true
+          files: m3-to-glb-*
+          body_path: notes.md

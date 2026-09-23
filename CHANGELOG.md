@@ -3,6 +3,14 @@
 All notable changes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- Dependencies updated, including `multiversion` 0.9 (SIMD dispatch) and
+  `anstream` 1.0; output is byte-identical.
+- Releases are created once, after all platforms build, with this changelog's
+  section as their notes.
+
 ## [0.2.0] — 2026-09-23
 
 The converter is now a library with a thin CLI on top, and every conversion is
