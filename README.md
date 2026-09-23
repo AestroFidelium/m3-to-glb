@@ -3,6 +3,7 @@
 [![CI](https://github.com/AestroFidelium/m3-to-glb/actions/workflows/ci.yml/badge.svg)](https://github.com/AestroFidelium/m3-to-glb/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/m3-to-glb.svg)](https://crates.io/crates/m3-to-glb)
 [![docs.rs](https://img.shields.io/docsrs/m3-to-glb)](https://docs.rs/m3-to-glb)
+[![coverage](https://codecov.io/gh/AestroFidelium/m3-to-glb/branch/main/graph/badge.svg)](https://codecov.io/gh/AestroFidelium/m3-to-glb)
 [![license](https://img.shields.io/badge/license-GPL--2.0--only-blue)](LICENSE)
 
 Converts Blizzard **M3** models — StarCraft II and Heroes of the Storm — into
