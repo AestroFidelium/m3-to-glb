@@ -135,3 +135,68 @@ fn effect_names_survive_a_json_string() {
     let raw = item.extras_json(&mat, &FxCurves::default());
     serde_json::from_str::<serde_json::Value>(&raw).expect("quoted name JSON");
 }
+
+#[test]
+fn every_optional_particle_field_is_written() {
+    let mut par = Par::zeroed();
+    par.additional_flags = 0xF; // speed / lifespan / mass randomize, world space
+    par.emit_speed_random.default = 1.5;
+    par.lifespan_random.default = 0.25;
+    par.emit_shape_size.default.x = 1.0;
+    par.emit_shape_radius.default = 2.0;
+    par.emit_shape_radius_cutout.default = 0.5;
+    par.emit_angle_x.default = 0.1;
+    par.emit_spread_x.default = 0.2;
+    par.gravity = -9.8;
+    par.drag = 0.1;
+    par.mass = 1.0;
+    par.mass2 = 2.0;
+    par.noise_amplitude = 0.3;
+    // inherit velocity, sort by height, collide with both, random flipbook
+    // start, tail fix, model particles
+    par.flags = 0x40 | 0x80 | 0x2 | 0x4 | 0x1_0000 | 0x10_0000 | 0x40_0000;
+    par.particle_type = 1;
+    par.uv_flipbook_cols = 2;
+    par.uv_flipbook_rows = 2;
+    par.uv_flipbook_start_lifespan_factor = 0.5;
+    par.trail_system = 0;
+
+    let fx = particle(par)["m3fx"].clone();
+    for key in ["shape", "angle", "spread", "gravity", "drag", "mass", "noise", "parent_velocity", "tail", "flipbook", "collide"] {
+        assert!(fx.get(key).is_some(), "missing {key}: {fx}");
+    }
+    assert_eq!(fx["space"], "world");
+    assert_eq!(fx["sort"], "height");
+    assert_eq!(fx["tail"]["mode"], "fix");
+    assert_eq!(fx["model_particles"], true);
+    assert_eq!(fx["flipbook"]["random_start"], true);
+    assert_eq!(fx["speed"]["random"], 1.5);
+    assert_eq!(fx["mass"]["random"], 2.0);
+
+    par.flags = 0x1 | 0x4_0000; // sort by distance, tail clamp
+    let fx = particle(par)["m3fx"].clone();
+    assert_eq!(fx["sort"], "distance");
+    assert_eq!(fx["tail"]["mode"], "clamp");
+    par.flags = 0;
+    assert_eq!(particle(par)["m3fx"]["tail"]["mode"], "free");
+}
+
+#[test]
+fn point_light_omits_cone_and_near_range() {
+    let lite = Lite::zeroed();
+    let item = FxItem { name: "LITE0".into(), bone: 0, matm_index: None, kind: FxKind::Light(Box::new(lite)) };
+    let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
+    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(v["m3fx"]["light"], "point");
+    assert!(v["m3fx"].get("inner_angle").is_none() && v["m3fx"].get("range_near").is_none());
+    assert!(item.translation().is_none());
+}
+
+#[test]
+fn colour_gradient_keeps_an_independent_alpha_key() {
+    let mut par = Par::zeroed();
+    par.color_anim_mid = 0.5;
+    par.alpha_anim_mid = 0.25;
+    let fx = particle(par)["m3fx"].clone();
+    assert_eq!(fx["color"]["alpha_mid"], 0.25);
+}
