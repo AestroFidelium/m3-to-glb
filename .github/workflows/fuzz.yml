@@ -27,7 +27,7 @@ jobs:
           - detect_version_never_panics_on_any_bytes
           - offsets_fit_within_stride
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2

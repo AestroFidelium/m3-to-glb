@@ -19,7 +19,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
@@ -32,7 +32,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
@@ -49,7 +49,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rm .cargo/config.toml rust-toolchain.toml
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -65,7 +65,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
@@ -93,7 +93,7 @@ jobs:
       matrix:
         target: [fuzz_whole_pipeline, fuzz_parse_never_panics]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
