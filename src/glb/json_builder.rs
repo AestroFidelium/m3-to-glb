@@ -3,6 +3,7 @@
 //! Deliberately serde-free — plain string concatenation for speed and zero
 //! dependencies. The JSON is minimal but valid per the glTF 2.0 spec.
 
+use crate::json;
 use std::fmt::Write as FmtWrite;
 
 // ─── Intermediate data structures ────────────────────────────────────────────
@@ -81,7 +82,6 @@ pub struct GltfNode {
 pub struct GltfSkin {
     pub joints:                Vec<usize>,    // node indices
     pub inverse_bind_matrices: Option<usize>, // accessor index (MAT4)
-    pub skeleton:              Option<usize>, // root joint node
 }
 
 pub struct GltfAnimSampler {
@@ -145,20 +145,28 @@ pub fn build_json(
     }
 
     // ── scene & nodes ─────────────────────────────────────────────────────────
-    j.push_str(r#""scene":0,"scenes":[{"nodes":["#);
-    for (i, root) in scene_roots.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        write!(j, "{}", root).unwrap();
+    // A model with nothing to show (every region hidden, no skeleton) declares
+    // no scene at all. glTF forbids empty `nodes` arrays, and the `gltf` crate
+    // (Bevy's loader) rejects a scene object without one — omitting `scenes` is
+    // the only form both accept.
+    if !scene_roots.is_empty() {
+        j.push_str(r#""scene":0,"scenes":[{"nodes":["#);
+        for (i, root) in scene_roots.iter().enumerate() {
+            if i > 0 { j.push(','); }
+            write!(j, "{}", root).unwrap();
+        }
+        j.push_str("]}],");
     }
-    j.push_str("]}],");
 
     // ── nodes ─────────────────────────────────────────────────────────────────
-    j.push_str(r#""nodes":["#);
-    for (i, n) in nodes.iter().enumerate() {
-        if i > 0 { j.push(','); }
-        write_node(&mut j, n);
+    if !nodes.is_empty() {
+        j.push_str(r#""nodes":["#);
+        for (i, n) in nodes.iter().enumerate() {
+            if i > 0 { j.push(','); }
+            write_node(&mut j, n);
+        }
+        j.push_str("],");
     }
-    j.push_str("],");
 
     // ── skins ─────────────────────────────────────────────────────────────────
     if !skins.is_empty() {
@@ -175,9 +183,6 @@ pub fn build_json(
             if let Some(ibm) = s.inverse_bind_matrices {
                 write!(j, r#","inverseBindMatrices":{}"#, ibm).unwrap();
             }
-            if let Some(sk) = s.skeleton {
-                write!(j, r#","skeleton":{}"#, sk).unwrap();
-            }
             j.push('}');
         }
         j.push_str("],");
@@ -188,7 +193,7 @@ pub fn build_json(
         j.push_str(r#""meshes":["#);
         for (i, mesh) in meshes.iter().enumerate() {
             if i > 0 { j.push(','); }
-            write!(j, r#"{{"name":{:?},"primitives":["#, mesh.name).unwrap();
+            write!(j, r#"{{"name":{},"primitives":["#, json::string(&mesh.name)).unwrap();
             for (pi, prim) in mesh.primitives.iter().enumerate() {
                 if pi > 0 { j.push(','); }
                 j.push('{');
@@ -229,7 +234,7 @@ pub fn build_json(
         for (i, mat) in materials.iter().enumerate() {
             if i > 0 { j.push(','); }
             j.push('{');
-            write!(j, r#""name":{:?},"#, mat.name).unwrap();
+            write!(j, r#""name":{},"#, json::string(&mat.name)).unwrap();
             j.push_str(r#""pbrMetallicRoughness":{"#);
             write!(j, r#""metallicFactor":{},"roughnessFactor":{}"#,
                 format_f32(mat.metallic_factor), format_f32(mat.roughness_factor)).unwrap();
@@ -258,7 +263,7 @@ pub fn build_json(
                     format_f32(mat.emissive_factor[2])).unwrap();
             }
             if let Some(ref mode) = mat.alpha_mode {
-                write!(j, r#","alphaMode":{:?}"#, mode).unwrap();
+                write!(j, r#","alphaMode":{}"#, json::string(mode)).unwrap();
                 if mode == "MASK" {
                     write!(j, r#","alphaCutoff":{}"#, format_f32(mat.alpha_cutoff)).unwrap();
                 }
@@ -296,7 +301,7 @@ pub fn build_json(
         j.push_str(r#""images":["#);
         for (i, img) in images.iter().enumerate() {
             if i > 0 { j.push(','); }
-            write!(j, r#"{{"bufferView":{},"mimeType":{:?}}}"#, img.buffer_view, img.mime_type).unwrap();
+            write!(j, r#"{{"bufferView":{},"mimeType":{}}}"#, img.buffer_view, json::string(&img.mime_type)).unwrap();
         }
         j.push_str("],");
     }
@@ -307,12 +312,12 @@ pub fn build_json(
         for (i, anim) in animations.iter().enumerate() {
             if i > 0 { j.push(','); }
             j.push('{');
-            write!(j, r#""name":{:?},"samplers":["#, anim.name).unwrap();
+            write!(j, r#""name":{},"samplers":["#, json::string(&anim.name)).unwrap();
             for (si, samp) in anim.samplers.iter().enumerate() {
                 if si > 0 { j.push(','); }
                 write!(
                     j,
-                    r#"{{"input":{},"output":{},"interpolation":{:?}}}"#,
+                    r#"{{"input":{},"output":{},"interpolation":"{}"}}"#,
                     samp.input, samp.output, samp.interpolation,
                 ).unwrap();
             }
@@ -321,7 +326,7 @@ pub fn build_json(
                 if ci > 0 { j.push(','); }
                 write!(
                     j,
-                    r#"{{"sampler":{},"target":{{"node":{},"path":{:?}}}}}"#,
+                    r#"{{"sampler":{},"target":{{"node":{},"path":"{}"}}}}"#,
                     ch.sampler, ch.target_node, ch.path,
                 ).unwrap();
             }
@@ -342,7 +347,7 @@ pub fn build_json(
         j.push('{');
         write!(
             j,
-            r#""bufferView":{},"componentType":{},"count":{},"type":{:?}"#,
+            r#""bufferView":{},"componentType":{},"count":{},"type":"{}""#,
             acc.buffer_view, acc.component_type, acc.count, acc.accessor_type,
         ).unwrap();
         if acc.byte_offset > 0 {
@@ -405,42 +410,44 @@ pub fn build_json(
 fn write_node(j: &mut String, n: &GltfNode) {
     j.push('{');
     let mut first = true;
-    macro_rules! sep { () => { if !first { j.push(','); } first = false; }; }
+    let mut sep = |j: &mut String| {
+        if !std::mem::take(&mut first) { j.push(','); }
+    };
 
     if let Some(ref name) = n.name {
-        sep!();
-        write!(j, r#""name":{:?}"#, name).unwrap();
+        sep(j);
+        write!(j, r#""name":{}"#, json::string(name)).unwrap();
     }
     if let Some(t) = n.translation {
-        sep!();
+        sep(j);
         write!(j, r#""translation":[{},{},{}]"#,
             format_f32(t[0]), format_f32(t[1]), format_f32(t[2])).unwrap();
     }
     if let Some(r) = n.rotation {
-        sep!();
+        sep(j);
         write!(j, r#""rotation":[{},{},{},{}]"#,
             format_f32(r[0]), format_f32(r[1]), format_f32(r[2]), format_f32(r[3])).unwrap();
     }
     if let Some(s) = n.scale {
-        sep!();
+        sep(j);
         write!(j, r#""scale":[{},{},{}]"#,
             format_f32(s[0]), format_f32(s[1]), format_f32(s[2])).unwrap();
     }
     if let Some(m) = n.mesh {
-        sep!();
+        sep(j);
         write!(j, r#""mesh":{}"#, m).unwrap();
     }
     if let Some(s) = n.skin {
-        sep!();
+        sep(j);
         write!(j, r#""skin":{}"#, s).unwrap();
     }
     if let Some(ref extras) = n.extras {
-        sep!();
+        sep(j);
         j.push_str(r#""extras":"#);
         j.push_str(extras);
     }
     if !n.children.is_empty() {
-        sep!();
+        sep(j);
         j.push_str(r#""children":["#);
         for (i, c) in n.children.iter().enumerate() {
             if i > 0 { j.push(','); }
@@ -451,21 +458,13 @@ fn write_node(j: &mut String, n: &GltfNode) {
     j.push('}');
 }
 
-/// Compact f32 formatting: `1.0`, `-3.0`, `1.5`.
+/// A glTF number: never `NaN` / `Infinity`, integral values without a fraction.
 fn format_f32(v: f32) -> String {
-    if v.is_finite() && v == v.trunc() && v.abs() < 1e15 {
-        format!("{:.1}", v)
-    } else {
-        format!("{}", v)
-    }
+    json::num(v)
 }
 
 fn format_f64(v: f64) -> String {
-    if v.is_finite() && v == v.trunc() && v.abs() < 1e15 {
-        format!("{:.1}", v)
-    } else {
-        format!("{}", v)
-    }
+    json::num64(v)
 }
 
 #[cfg(test)]
@@ -477,7 +476,7 @@ mod tests {
         let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[], false);
         assert!(json.contains(r#""asset""#));
         assert!(json.contains(r#""version":"2.0""#));
-        assert!(json.contains(r#""scene":0"#));
+        assert!(!json.contains(r#""scene""#));
     }
 
     #[test]
@@ -497,9 +496,21 @@ mod tests {
     }
 
     #[test]
-    fn test_format_f32_compact() {
-        assert_eq!(format_f32(1.0),  "1.0");
-        assert_eq!(format_f32(-3.0), "-3.0");
+    fn test_format_is_json_safe() {
+        assert_eq!(format_f32(1.0),  "1");
+        assert_eq!(format_f32(-3.0), "-3");
         assert_eq!(format_f32(1.5),  "1.5");
+        assert_eq!(format_f32(f32::NAN), "0");
+        assert_eq!(format_f64(f64::INFINITY), "0");
+    }
+
+    #[test]
+    fn empty_model_declares_no_scene() {
+        // glTF forbids empty `nodes` arrays, and a scene may only list nodes
+        // that exist.
+        let json = build_json(&[], &[], &[], 0, &[], &[], &[], &[], &[], &[], false);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("nodes").is_none(), "{json}");
+        assert!(v.get("scenes").is_none(), "{json}");
     }
 }

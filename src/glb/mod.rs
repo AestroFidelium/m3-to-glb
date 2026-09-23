@@ -32,9 +32,8 @@ use crate::fx;
 use crate::m3::reader::M3File;
 use crate::processor::MeshDataSoA;
 use crate::processor::anim::{self, Path as AnimPath, SamplerData};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytemuck::cast_slice;
-use std::io::Write;
 use tracing::{debug, warn};
 
 /// Per-conversion options that affect how textures and geometry are packed.
@@ -63,56 +62,63 @@ const GLB_VERSION:     u32 = 2;
 const CHUNK_TYPE_JSON: u32 = 0x4E4F534A; // "JSON"
 const CHUNK_TYPE_BIN:  u32 = 0x004E4942; // "BIN\0"
 
-/// Assemble the GLB and write it to disk.
-pub fn pack_and_write(
+/// Assemble the GLB in memory.
+///
+/// `anim_sources` are the companion `.m3a` files (the base model is always
+/// consulted too). The result is a complete `glTF` binary: header, JSON chunk
+/// and — when anything needs it — a BIN chunk.
+///
+/// # Errors
+///
+/// Fails when the model is too malformed to lay out, or when the assembled
+/// file would exceed the 4 GiB a GLB header can describe.
+pub fn pack(
     meshes:       &[MeshDataSoA],
     textures:     &TextureCache,
     m3:           &M3File<'_>,
     anim_sources: &[&M3File<'_>],
-    output_path:  &str,
     options:      &PackOptions,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let (json_bytes, bin_bytes) =
         build_glb_content(meshes, textures, m3, anim_sources, options)?;
+    assemble(&json_bytes, &bin_bytes)
+}
 
-    // Align JSON to 4 bytes (padding = 0x20 spaces).
-    let json_padded = align4_json(&json_bytes);
-    // Align BIN to 4 bytes (padding = zero bytes).
-    let bin_padded  = align4_zeros(&bin_bytes);
+/// Frame a JSON manifest and a binary buffer as a GLB file.
+fn assemble(json: &[u8], bin: &[u8]) -> Result<Vec<u8>> {
+    // JSON pads with spaces, BIN with zeros — both to a 4-byte boundary.
+    let json_len = align_to_4(json.len());
+    let bin_len  = align_to_4(bin.len());
+    // The BIN chunk is omitted entirely when there is nothing to put in it — an
+    // effect-only model can consist of nodes alone, and the JSON then declares
+    // no buffer either.
+    let bin_chunk = if bin_len == 0 { 0 } else { 8 + bin_len };
+    let total = 12 + 8 + json_len + bin_chunk;
+    let total_u32 = u32::try_from(total)
+        .map_err(|_| anyhow::anyhow!("GLB would be {total} bytes — over the 4 GiB format limit"))?;
 
-    let bin_chunk_size = if bin_padded.is_empty() { 0 } else { 8 + bin_padded.len() as u32 };
-    let total_size: u32 = 12 // GLB header
-        + 8 + json_padded.len() as u32  // JSON chunk header + data
-        + bin_chunk_size;               // BIN chunk header + data, when present
+    debug!("GLB: JSON {}B, BIN {}B, total {}B", json_len, bin_len, total);
 
-    debug!(
-        "GLB: JSON {}B, BIN {}B, total {}B",
-        json_padded.len(), bin_padded.len(), total_size
-    );
+    let mut out = Vec::with_capacity(total);
+    // Lengths below are bounded by `total`, which fits in u32.
+    let len32 = |n: usize| n as u32;
+    out.extend_from_slice(&GLB_MAGIC.to_le_bytes());
+    out.extend_from_slice(&GLB_VERSION.to_le_bytes());
+    out.extend_from_slice(&total_u32.to_le_bytes());
 
-    let mut file = std::fs::File::create(output_path)
-        .with_context(|| format!("cannot create file: {}", output_path))?;
+    out.extend_from_slice(&len32(json_len).to_le_bytes());
+    out.extend_from_slice(&CHUNK_TYPE_JSON.to_le_bytes());
+    out.extend_from_slice(json);
+    out.resize(out.len() + (json_len - json.len()), b' ');
 
-    // ── GLB Header ────────────────────────────────────────────────────────────
-    write_u32(&mut file, GLB_MAGIC)?;
-    write_u32(&mut file, GLB_VERSION)?;
-    write_u32(&mut file, total_size)?;
-
-    // ── JSON Chunk ────────────────────────────────────────────────────────────
-    write_u32(&mut file, json_padded.len() as u32)?;
-    write_u32(&mut file, CHUNK_TYPE_JSON)?;
-    file.write_all(&json_padded)?;
-
-    // ── BIN Chunk ─────────────────────────────────────────────────────────────
-    // Omitted entirely when there is nothing to put in it — an effect-only model
-    // can consist of nodes alone, and the JSON then declares no buffer either.
-    if !bin_padded.is_empty() {
-        write_u32(&mut file, bin_padded.len() as u32)?;
-        write_u32(&mut file, CHUNK_TYPE_BIN)?;
-        file.write_all(&bin_padded)?;
+    if bin_chunk != 0 {
+        out.extend_from_slice(&len32(bin_len).to_le_bytes());
+        out.extend_from_slice(&CHUNK_TYPE_BIN.to_le_bytes());
+        out.extend_from_slice(bin);
+        out.resize(out.len() + (bin_len - bin.len()), 0);
     }
-
-    Ok(())
+    debug_assert_eq!(out.len(), total);
+    Ok(out)
 }
 
 /// Convenience helper to build an Accessor with default `normalized=false`.
@@ -370,10 +376,8 @@ fn build_glb_content(
                 // textureless effect geometry renders as stray white panels).
                 let base_color_factor = if base_color_tex.is_some() || !diff_path.is_empty() {
                     [1.0, 1.0, 1.0, 1.0]
-                } else if let Some(c) = m3.layer_color(mat_idx, "diff") {
-                    c
                 } else {
-                    [0.0, 0.0, 0.0, 1.0]
+                    m3.layer_color(mat_idx, "diff").unwrap_or([0.0, 0.0, 0.0, 1.0])
                 };
 
                 json_builder::GltfMaterial {
@@ -456,12 +460,17 @@ fn build_glb_content(
         materials_json.push(glt);
     }
 
-    // Per-mesh skinning accessors: skin index (in skins_json) if skinned.
-    let mut mesh_skin_idx: Vec<Option<usize>> = Vec::with_capacity(meshes.len());
+    // `mesh_nodes[i]` — whether glTF mesh `i` is skinned. One scene node per
+    // mesh is emitted after the skeleton.
+    let mut mesh_skinned: Vec<bool> = Vec::with_capacity(meshes.len());
 
     for (mesh_idx, mesh) in meshes.iter().enumerate() {
-        if mesh.vertex_count() == 0 {
-            mesh_skin_idx.push(None);
+        // A mesh is only worth emitting when some region contributes
+        // triangles: glTF accessors must have `count >= 1`, and a primitive with
+        // nothing to draw is noise.
+        if mesh.vertex_count() == 0
+            || !mesh.region_primitives.iter().any(|rp| rp.index_count > 0)
+        {
             continue;
         }
 
@@ -512,7 +521,7 @@ fn build_glb_content(
             (None, None)
         };
 
-        mesh_skin_idx.push(if mesh.has_skin { Some(0) } else { None });
+        mesh_skinned.push(mesh.has_skin);
 
         // ── Indices ─────────────────────────────────────────────────────────
         let idx_bytes_slice: &[u8] = cast_slice(&mesh.indices);
@@ -520,43 +529,15 @@ fn build_glb_content(
             &mut buffer_views, &mut bin_buf, idx_bytes_slice, Some(34963),
         );
 
-        if !mesh.region_primitives.is_empty() {
-            for rp in &mesh.region_primitives {
-                if rp.index_count == 0 { continue; }
-                let idx_acc_idx = accessors.len();
-                accessors.push(acc(
-                    idx_bv_idx, rp.index_start * 4, 5125, rp.index_count, "SCALAR", None, None,
-                ));
-
-                let material_idx = rp.material_index
-                    .and_then(|mi| matref_remap.get(mi).copied().flatten());
-                let (tangent_accessor, texcoord_accessor) =
-                    prim_attr_accessors(material_idx, &materials_json, tang_acc_idx, uv_acc_idx);
-
-                primitives.push(json_builder::Primitive {
-                    position_accessor: pos_acc_idx,
-                    normal_accessor:   norm_acc_idx,
-                    tangent_accessor,
-                    texcoord_accessor,
-                    indices_accessor:  idx_acc_idx,
-                    material:          material_idx,
-                    joints_accessor:   joints_acc_idx,
-                    weights_accessor:  weights_acc_idx,
-                });
-            }
-        }
-
-        if primitives.is_empty() {
+        for rp in &mesh.region_primitives {
+            if rp.index_count == 0 { continue; }
             let idx_acc_idx = accessors.len();
             accessors.push(acc(
-                idx_bv_idx, 0, 5125, mesh.indices.len(), "SCALAR", None, None,
+                idx_bv_idx, rp.index_start * 4, 5125, rp.index_count, "SCALAR", None, None,
             ));
 
-            let material_idx = if !materials_json.is_empty() {
-                Some(mesh_idx.min(materials_json.len() - 1))
-            } else {
-                None
-            };
+            let material_idx = rp.material_index
+                .and_then(|mi| matref_remap.get(mi).copied().flatten());
             let (tangent_accessor, texcoord_accessor) =
                 prim_attr_accessors(material_idx, &materials_json, tang_acc_idx, uv_acc_idx);
 
@@ -645,7 +626,7 @@ fn build_glb_content(
     // ── Skeleton ─────────────────────────────────────────────────────────────
     // One skeleton per skinned mesh (shared if bones are common). In M3 the
     // bones are shared across the whole model, so a single skin is enough.
-    let any_skinned = meshes.iter().any(|m| m.has_skin);
+    let any_skinned = mesh_skinned.iter().any(|&s| s);
     // Effects need the skeleton even with no skinned geometry to hang it on:
     // the emitter node is a child of its bone, and that bone's animation is what
     // moves the effect through the world.
@@ -654,7 +635,6 @@ fn build_glb_content(
     // bones for `Ref_Head` to exist as a node at all.
     let want_bones = any_skinned || !fx_items.is_empty() || m3.has_attachment_points();
     let bones = if want_bones { m3.bones().unwrap_or_default() } else { Vec::new() };
-    let bone_rests = if any_skinned { m3.bone_rests().unwrap_or_default() } else { Vec::new() };
 
     // Scene layout (no separate rotation root — the skinned mesh node must
     // sit directly in scene roots; otherwise glTF emits NODE_SKINNED_MESH_NON_ROOT
@@ -686,8 +666,13 @@ fn build_glb_content(
     for a in &attachments {
         // Two attachments on one bone would fight over the same `extras`; the
         // first wins, which matches the order the game's own table lists them.
-        if attach_extras.insert(a.bone, a.extras_json()).is_some() {
-            warn!("bone {} carries more than one attachment point — kept the first", a.bone);
+        match attach_extras.entry(a.bone) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(a.extras_json());
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {
+                warn!("bone {} carries more than one attachment point — kept the first", a.bone);
+            }
         }
     }
     if !attachments.is_empty() {
@@ -701,7 +686,7 @@ fn build_glb_content(
         let r = bone.rotation.default;
         let s = bone.scale.default;
 
-        let (translation, rotation) = if bone.parent < 0 {
+        let (translation, rotation) = if bone.parent_index(bi).is_none() {
             // Root bone: bake Z-up → Y-up into the local TRS:
             //   T' = R · T (rotate translation vector)
             //   Q' = R_quat ⊗ Q (compose rotations)
@@ -732,13 +717,9 @@ fn build_glb_content(
     let mut bone_root_nodes: Vec<usize> = Vec::new();
     for (bi, bone) in bones.iter().enumerate() {
         let child_node = bone_node_base + bi;
-        if bone.parent < 0 {
-            bone_root_nodes.push(child_node);
-        } else {
-            let parent_node = bone_node_base + bone.parent as usize;
-            if parent_node < nodes.len() {
-                nodes[parent_node].children.push(child_node);
-            }
+        match bone.parent_index(bi) {
+            Some(parent) => nodes[bone_node_base + parent].children.push(child_node),
+            None => bone_root_nodes.push(child_node),
         }
     }
 
@@ -747,10 +728,8 @@ fn build_glb_content(
     // parameters in `extras`. Nothing else in the glTF references these nodes:
     // they exist so that an engine walking the spawned scene finds the emitter
     // already positioned, already parented, and already animated.
-    for item in &fx_items {
-        if item.bone >= bones.len() {
-            continue;
-        }
+    // `fx::collect` already dropped effects on bones past the end.
+    for item in fx_items.iter().filter(|it| it.bone < bones.len()) {
         let mat = item
             .matm_index
             .and_then(|i| fx_materials.get(&i))
@@ -798,34 +777,30 @@ fn build_glb_content(
         let joints: Vec<usize> = (0..bones.len()).map(|i| bone_node_base + i).collect();
         skins.push(json_builder::GltfSkin {
             joints,
-            inverse_bind_matrices: Some(ibm_acc_idx),
-            // The `skeleton` field is optional; we leave it None to avoid
+            // No `skeleton`: it is optional, and naming one trips
             // SKIN_SKELETON_INVALID when there are multiple bone roots.
-            skeleton: None,
+            inverse_bind_matrices: Some(ibm_acc_idx),
         });
-        let _ = bone_rests; // reader retained for future use (rest-pose tooling)
         Some(0)
     } else {
         None
     };
 
-    // Mesh node — after the bones.
-    let mesh_node = if !meshes_json.is_empty() {
-        let idx = nodes.len();
+    // Mesh nodes — after the bones, one per emitted mesh.
+    let mut mesh_nodes: Vec<usize> = Vec::with_capacity(meshes_json.len());
+    for (i, &skinned) in mesh_skinned.iter().enumerate() {
+        mesh_nodes.push(nodes.len());
         nodes.push(json_builder::GltfNode {
-            name:        Some("mesh".into()),
+            name:        Some(if i == 0 { "mesh".into() } else { format!("mesh_{i}") }),
             translation: None,
             rotation:    None,
             scale:       None,
-            mesh:        Some(0),
-            skin:        skin_idx,
+            mesh:        Some(i),
+            skin:        if skinned { skin_idx } else { None },
             children:    Vec::new(),
             extras:      None,
         });
-        Some(idx)
-    } else {
-        None
-    };
+    }
 
     // glTF requires all joints in a skin to share a common ancestor
     // (SKIN_NO_COMMON_ROOT otherwise). When there are multiple root bones we
@@ -851,12 +826,7 @@ fn build_glb_content(
     } else {
         scene_roots.extend(bone_root_nodes);
     }
-    if let Some(mn) = mesh_node {
-        scene_roots.push(mn);
-    }
-    if scene_roots.is_empty() {
-        scene_roots.push(0);
-    }
+    scene_roots.extend(mesh_nodes);
 
     // ── Animations ───────────────────────────────────────────────────────────
     // bone_node_base = 0: bones occupy the first [0..bones.len()] node indices.
@@ -948,7 +918,6 @@ fn build_glb_content(
         options.bevy_compat,
     );
 
-    let _ = mesh_skin_idx; // currently unused, retained for future per-mesh skin mapping
     Ok((json.into_bytes(), bin_buf))
 }
 
@@ -985,22 +954,6 @@ fn push_buffer_view(
     idx
 }
 
-fn align4_json(data: &[u8]) -> Vec<u8> {
-    let mut out = data.to_vec();
-    while out.len() % 4 != 0 {
-        out.push(b' ');
-    }
-    out
-}
-
-fn align4_zeros(data: &[u8]) -> Vec<u8> {
-    let mut out = data.to_vec();
-    while out.len() % 4 != 0 {
-        out.push(0u8);
-    }
-    out
-}
-
 #[inline]
 fn align_to_4(n: usize) -> usize {
     (n + 3) & !3
@@ -1024,7 +977,8 @@ fn compute_world_matrices(
         let t = bone.location.default;
         let r = bone.rotation.default;
         let s = bone.scale.default;
-        let (t3, q4) = if bone.parent < 0 {
+        let parent = bone.parent_index(i);
+        let (t3, q4) = if parent.is_none() {
             let t_rot = rotate_vec_by_quat([t.x, t.y, t.z], zy_quat);
             let q_rot = quat_mul(zy_quat, [r.x, r.y, r.z, r.w]);
             (t_rot, q_rot)
@@ -1032,10 +986,9 @@ fn compute_world_matrices(
             ([t.x, t.y, t.z], [r.x, r.y, r.z, r.w])
         };
         let local = trs_to_mat4_explicit(t3, q4, [s.x, s.y, s.z]);
-        let m = if bone.parent < 0 || (bone.parent as usize) >= i {
-            local
-        } else {
-            mul_4x4(&world[bone.parent as usize], &local)
+        let m = match parent {
+            Some(p) => mul_4x4(&world[p], &local),
+            None => local,
         };
         world.push(m);
     }
@@ -1089,36 +1042,6 @@ fn rotate_vec_by_quat(v: [f32; 3], q: [f32; 4]) -> [f32; 3] {
         v[0] + qw * tx + (qy * tz - qz * ty),
         v[1] + qw * ty + (qz * tx - qx * tz),
         v[2] + qw * tz + (qx * ty - qy * tx),
-    ]
-}
-
-fn trs_to_mat4(
-    t: crate::m3::structures::Vec3,
-    r: crate::m3::structures::Quat,
-    s: crate::m3::structures::Vec3,
-) -> [[f32; 4]; 4] {
-    // Quat (xyzw) → 3x3 rotation matrix.
-    let (x, y, z, w) = (r.x, r.y, r.z, r.w);
-    let xx = x * x; let yy = y * y; let zz = z * z;
-    let xy = x * y; let xz = x * z; let yz = y * z;
-    let wx = w * x; let wy = w * y; let wz = w * z;
-
-    let r00 = 1.0 - 2.0 * (yy + zz);
-    let r01 = 2.0 * (xy - wz);
-    let r02 = 2.0 * (xz + wy);
-    let r10 = 2.0 * (xy + wz);
-    let r11 = 1.0 - 2.0 * (xx + zz);
-    let r12 = 2.0 * (yz - wx);
-    let r20 = 2.0 * (xz - wy);
-    let r21 = 2.0 * (yz + wx);
-    let r22 = 1.0 - 2.0 * (xx + yy);
-
-    // Column-major: m[col][row].
-    [
-        [r00 * s.x, r10 * s.x, r20 * s.x, 0.0],
-        [r01 * s.y, r11 * s.y, r21 * s.y, 0.0],
-        [r02 * s.z, r12 * s.z, r22 * s.z, 0.0],
-        [t.x,       t.y,       t.z,       1.0],
     ]
 }
 
@@ -1188,11 +1111,6 @@ fn invert_4x4(m: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
         [inv[2],  inv[6],  inv[10], 0.0],
         [inv[3],  inv[7],  inv[11], 1.0],
     ]
-}
-
-#[inline]
-fn write_u32(w: &mut impl Write, v: u32) -> Result<()> {
-    w.write_all(&v.to_le_bytes()).map_err(Into::into)
 }
 
 /// MADD material texture slot, derived from the filename suffix.

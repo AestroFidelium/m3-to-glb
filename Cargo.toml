@@ -1,45 +1,73 @@
 [package]
 name = "m3-to-glb"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 license = "GPL-2.0-only"
-description = "Fast Rust converter from Blizzard M3 (StarCraft II / Heroes of the Storm) to glTF 2.0 Binary."
+description = "Zero-copy converter from Blizzard M3 models (StarCraft II / Heroes of the Storm) to glTF 2.0 binary: meshes, materials, skeletons, animations, particle effects."
 repository = "https://github.com/AestroFidelium/m3-to-glb"
+documentation = "https://docs.rs/m3-to-glb"
+readme = "README.md"
+authors = ["AestroFidelium"]
+keywords = ["gltf", "m3", "starcraft2", "blizzard", "reverse-engineering"]
+categories = ["game-development", "graphics", "parser-implementations", "command-line-utilities", "encoding"]
+exclude = [
+  "/.cargo", "/.github", "/.claude", "/flake.*", "/scripts", "/integration",
+  "/CLAUDE.md", "*.m3", "*.m3a", "*.glb", "*.png",
+]
+
+[package.metadata.docs.rs]
+# docs.rs builds the library only — the CLI adds nothing to the API surface.
+no-default-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "m3_to_glb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "m3-to-glb"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+# Everything only the command-line binary needs. Library users turn it off with
+# `default-features = false` and get the converter without clap, a global
+# allocator, or a terminal logger.
+cli = [
+  "dep:clap",
+  "dep:clap_complete",
+  "dep:tracing-subscriber",
+  "dep:anstream",
+  "dep:color-print",
+  "dep:mimalloc",
+  "dep:memmap2",
+]
 
 [dependencies]
-anyhow = "1"
 ahash = "0.8"
-crossbeam-channel = "0.5"
-dirs-next = "2"
-memchr = "2"
-mimalloc = { version = "0.1", default-features = false }
-multiversion = "0.7"
-rayon = "1"
-smallvec = { version = "1", features = ["union"] }
-wide = "0.7"
-tracing = "0.1"
-log = "0.4"
-indicatif = "0.17"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-indicatif = "0.3"
-bumpalo = { version = "3", features = ["collections"] }
-memmap2 = "0.9"
-vek = { version = "0.17", features = ["bytemuck"] }
-bytemuck = { version = "1", features = ["derive"] }
 aho-corasick = "1"
-simdutf8 = "0.1"
-xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
-lz4_flex = "0.11"
-zstd = "0.13"
-anstream = "0.6"
-color-print = "0.3"
-clap = { version = "4", features = ["derive", "color", "string"] }
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "dds", "tga", "jpeg"] }
+multiversion = "0.8"
+rayon = "1"
+simdutf8 = "0.1"
 tempfile = "3"
+thiserror = "2"
+tracing = "0.1"
+wide = "0.7"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
-[build-dependencies]
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
+# ── `cli` feature ──
+anstream = { version = "0.6", optional = true }
+clap = { version = "4", features = ["derive", "color", "string"], optional = true }
+clap_complete = { version = "4", optional = true }
+color-print = { version = "0.3", optional = true }
+memmap2 = { version = "0.9", optional = true }
+mimalloc = { version = "0.1", default-features = false, optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Test / fuzz tooling.
@@ -49,6 +77,12 @@ clap_complete = "4"
 # ──────────────────────────────────────────────────────────────────────────────
 [dev-dependencies]
 bolero = { version = "0.13", features = ["arbitrary"] }
+# Structured fuzz inputs: a whole synthetic model is derived from the fuzzer's
+# bytes, so the search starts from files that parse instead of from noise.
+arbitrary = { version = "1", features = ["derive"] }
+# Independent glTF loader used as an oracle — every GLB we emit must load in it.
+gltf = { version = "1", default-features = false, features = ["utils", "extras", "names", "import"] }
+tempfile = "3"
 # Effect parameters are written as hand-rolled JSON straight into the GLB's JSON
 # chunk, where one malformed byte costs the whole file — so the tests parse the
 # output with a real parser rather than eyeballing the string.
@@ -56,14 +90,22 @@ serde_json = "1"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Silence false-positive warnings from `multiversion` about its retpoline cfg.
-# Noise from the crate itself, not our code.
+# Lints. CI runs `cargo clippy --all-targets --all-features -- -D warnings`.
 # ──────────────────────────────────────────────────────────────────────────────
 [lints.rust]
+# `bolero` and `multiversion` read cfgs rustc does not know about.
 unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(fuzzing)',
+  'cfg(kani)',
   'cfg(retpoline)',
   'cfg(retpoline, values("indirect-branches", "indirect-calls"))',
 ] }
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Release: maximum optimisation
@@ -80,11 +122,10 @@ panic = "abort"
 strip = "symbols"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Fuzzing profile for `cargo bolero test`.
-# Distinct from `dev` so it does NOT pick up the cranelift backend pinned to
-# `[profile.dev]` in `.cargo/config.toml` — sanitizer-coverage needs the LLVM
-# backend. debug-assertions + overflow-checks turn silent UB into crashes the
-# fuzzer can catch.
+# Fuzzing profile for `cargo bolero test --profile fuzz`.
+# `.cargo/config.toml` pins it to the LLVM backend (the `dev` profile it inherits
+# from uses cranelift, which has no sanitizer-coverage passes). debug-assertions
+# + overflow-checks turn silent wrap-around into crashes the fuzzer can catch.
 # ──────────────────────────────────────────────────────────────────────────────
 [profile.fuzz]
 inherits = "dev"
@@ -98,5 +139,3 @@ overflow-checks = true
 [profile.dev.package."*"]
 opt-level = 3
 
-[profile.release.build-override]
-opt-level = 3

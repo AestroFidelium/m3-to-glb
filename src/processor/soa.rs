@@ -3,8 +3,6 @@
 //! Each field is a dense single-type array. Both SIMD and rayon work most
 //! efficiently against dense arrays.
 
-use smallvec::SmallVec;
-
 /// Primitive info for a single region of a mesh.
 /// Lets a single mesh carry different materials per region.
 #[derive(Debug, Clone, Default)]
@@ -66,9 +64,6 @@ pub struct MeshDataSoA {
     /// AABB (bounding box) — computed during conversion.
     pub aabb_min: [f32; 3],
     pub aabb_max: [f32; 3],
-
-    /// Region names (small vec — region count is usually low).
-    pub region_names: SmallVec<[String; 4]>,
 
     /// Per-region primitive info (for multi-material meshes).
     pub region_primitives: Vec<RegionPrimitiveInfo>,
@@ -209,10 +204,6 @@ impl MeshDataSoA {
             out.extend_from_slice(bytemuck::bytes_of(&v));
         }
         out
-    }
-
-    pub fn indices_as_bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.indices)
     }
 
     /// Tangents as VEC4 (xyzw) — glTF requires 4 components, w is the bitangent sign.

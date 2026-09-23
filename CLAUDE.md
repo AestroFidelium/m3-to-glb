@@ -9,29 +9,40 @@ cargo build                  # debug build
 cargo build --release        # optimized build (LTO, single CGU, mimalloc)
 cargo run -- <input.m3>      # convert with auto-derived output path
 cargo run -- <input.m3> -o out.glb -t ./textures -v debug
-cargo clippy
+cargo clippy --all-targets --all-features -- -D warnings   # CI gate, must be clean
+cargo test --all-features                                  # unit + integration + bolero replay
+cargo bolero test --profile fuzz fuzz_whole_pipeline -T 5min   # real libFuzzer run
+M3_CORPUS=/mnt/Projects/StarCraftExtracted/out cargo test --release --test corpus -- --ignored
 ```
 
-Requires nightly toolchain (defined in `rust-toolchain.toml`).
+Nightly (pinned in `rust-toolchain.toml`) is only for dev speed — cranelift +
+mold in `.cargo/config.toml`. The crate builds on stable ≥ `rust-version`.
+
+Coverage: `CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo llvm-cov --all-features`
+(instrumentation needs LLVM, not cranelift).
 
 Enable verbose tracing via CLI flag `-v debug` or env var `RUST_LOG=debug`.
 
 ## Architecture
 
-Five-stage pipeline in `main.rs::run_conversion()`:
+Library + thin binary. `lib.rs::Converter::convert(&[u8]) -> Glb` runs the
+pipeline; `main.rs` only parses args, mmaps files (the one `unsafe` in the
+repo — the library is `#![forbid(unsafe_code)]`) and prints stats. The `cli`
+feature (default) gates clap, mimalloc, memmap2 and the terminal logger.
 
-1. **mmap** — `memmap2::MmapOptions::new().map(&file)` — zero-copy file access
-2. **M3 parse** — `m3::parse(&mmap)` → `M3File<'data>` whose lifetime is tied to the mmap buffer
-3. **Texture index** — `assets::TextureCache::build(dir)` — walks directory, hashes `stem.to_lowercase()` with xxh3
-4. **Geometry convert** — `processor::convert_all_meshes(&m3)` — rayon parallel per Division, AoS vertex buffer → `MeshDataSoA` SoA layout, SIMD via `multiversion` (AVX2 / SSE4.1 / scalar)
-5. **GLB pack** — `glb::pack_and_write(meshes, textures, m3, path)` — writes glTF 2.0 binary (JSON chunk + BIN chunk)
+1. **M3 parse** — `m3::parse(bytes)` → `M3File<'data>` borrowing the input buffer
+2. **Texture index** — `assets::TextureCache::build(dir)` — walks directory, hashes `stem.to_lowercase()` with xxh3
+3. **Geometry convert** — `processor::convert_all_meshes(&m3)` — rayon parallel per Division, AoS vertex buffer → `MeshDataSoA` SoA layout, SIMD via `multiversion` (AVX2 / SSE4.1 / scalar)
+4. **GLB pack** — `glb::pack(meshes, textures, m3, anims, opts) -> Vec<u8>` — glTF 2.0 binary (JSON chunk + BIN chunk)
 
 ### Module map
 
 | Path | Responsibility |
 |---|---|
-| `src/main.rs` | Pipeline orchestration, CLI wiring |
-| `src/cli.rs` | `Cli` struct (clap) |
+| `src/lib.rs` | Public API: `Converter`, `Glb`, `Stats`, `Error` |
+| `src/main.rs` | CLI front end (mmap, logging, stats print, `--completions`) |
+| `src/cli.rs` | `Cli` struct (clap) — part of the binary, not the library |
+| `src/json.rs` | JSON string escaping / finite numbers / `Obj` writer shared by manifest + extras |
 | `src/m3/mod.rs` | `parse()`, version detection (MD32/33/34), magic bytes |
 | `src/m3/reader.rs` | `M3File<'data>` — tag navigation, geometry/material/layer accessors |
 | `src/m3/structures.rs` | `#[repr(C)] + Pod` structs: `M3Header`, `TagEntry`, `Division`, `Region`, `Batch`, `Bone`, `Layer`, `Reference` |
@@ -44,6 +55,8 @@ Five-stage pipeline in `main.rs::run_conversion()`:
 | `src/glb/mod.rs` | Binary GLB assembler, material alpha/double-sided logic |
 | `src/glb/json_builder.rs` | glTF JSON manifest builder |
 | `src/assets/mod.rs` | `TextureCache` — xxh3-hashed filename index, path normalisation |
+| `tests/common/mod.rs` | `ModelSpec` synthetic M3 writer + `check_glb` oracle (gltf crate + range/forest checks) |
+| `tests/fuzz_pipeline.rs` | structure-aware bolero target: `FuzzModel` → M3 bytes → corrupt → convert → oracle |
 
 ### Critical non-obvious details
 
@@ -74,3 +87,8 @@ bone called `Vol_Target`. Matching `Ref_*` node names instead of reading the
 table silently loses exactly the volume attachments (`src/attach.rs`).
 
 `M3File` never casts `ModelHeader` directly — the actual data layout doesn't match; tags are navigated by searching `tags[]` for LE names.
+
+**Everything written to the JSON chunk comes from an untrusted file.** Strings
+go through `json::string` (never `{:?}` — Rust's Debug escapes are not JSON),
+numbers through `json::num` (NaN/inf → 0). Any count read from the file is
+bounded by the bytes that remain before it reaches `Vec::with_capacity`.

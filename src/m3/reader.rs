@@ -17,7 +17,7 @@
 //! Instead we look up tags directly by their LE name.
 
 use super::structures::{
-    Att, Atvl, Bat, Bone, Cmp, Cms, Div, Iref, Layr, Lite, Matm, MdIndexEntry, Par, Proj, Quat,
+    Att, Atvl, Bat, Bone, Cmp, Cms, Div, Iref, Lite, Matm, MdIndexEntry, Par, Proj, Quat,
     Reference, Regn, Schr, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec3,
 };
 use super::{M3Version, detect_version};
@@ -29,9 +29,6 @@ use tracing::debug;
 const TAG_DIV: &[u8; 4] = b"_VID"; // "DIV_"
 const TAG_BONE: &[u8; 4] = b"ENOB"; // "BONE"
 const TAG_VERTICES: &[u8; 4] = b"__8U"; // "U8__" — vertices (count = bytes)
-const TAG_INDICES: &[u8; 4] = b"_61U"; // "U16_" — u16 indices
-
-const TAG_BATCHES: &[u8; 4] = b"_TAB"; // "BAT_"
 
 // Effect tags. Located by name rather than through the MODL references that
 // point at them: those field offsets move between MODL versions, while exactly
@@ -116,10 +113,59 @@ pub fn stride_from_flags(flags: u32) -> usize {
     size
 }
 
+/// Size in bytes of one `MAT_` record of the given tag version. Unknown
+/// versions are read with the v20 layout.
+#[must_use]
+pub const fn mat_record_size(version: u32) -> usize {
+    match version {
+        15 => 268,
+        16..=18 => 280,
+        19 => 340,
+        _ => 352,
+    }
+}
+
+/// Size in bytes of one `LAYR` record of the given tag version. Unknown
+/// versions are read with the v20 layout.
+#[must_use]
+pub const fn layr_record_size(version: u32) -> usize {
+    match version {
+        23 => 428,
+        24 => 436,
+        25 => 468,
+        26 => 464,
+        _ => 356,
+    }
+}
+
+/// Offset of `uv_tiling` inside a `LAYR` record. v23 adds `triplanar` *after*
+/// it; v24+ insert `noise_amplitude` / `noise_frequency` before it.
+#[must_use]
+pub const fn layr_uv_tiling_offset(version: u32) -> usize {
+    match version {
+        24..=26 => 252,
+        _ => 244,
+    }
+}
+
+/// A parsed M3 file: the tag table, borrowed from the file's bytes.
+///
+/// Every accessor bounds-checks against the buffer, so a corrupt file yields
+/// errors or empty results — never a panic.
 pub struct M3File<'data> {
     data: &'data [u8],
     version: M3Version,
     tags: &'data [MdIndexEntry],
+}
+
+impl std::fmt::Debug for M3File<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("M3File")
+            .field("version", &self.version)
+            .field("bytes", &self.data.len())
+            .field("tags", &self.tags.len())
+            .finish()
+    }
 }
 
 impl<'data> M3File<'data> {
@@ -479,7 +525,7 @@ impl<'data> M3File<'data> {
         // Region size depends on the NGER (REGN) tag version. Matches
         // RegnV2..RegnV5 in structures.rs.
         let file_elem_sz: usize = match version {
-            0 | 1 | 2 => 28, // till_v2: u16 first_vertex_index/vertex_count, no unknown01
+            0..=2 => 28, // till_v2: u16 first_vertex_index/vertex_count, no unknown01
             3 => 36,         // +unknown01, u32 first_vertex_index/vertex_count
             4 => 40,         // +flags
             _ => 48,         // v5+: +uv_multiply, +uv_offset
@@ -498,7 +544,10 @@ impl<'data> M3File<'data> {
         );
 
         let start = entry.offset as usize;
-        let mut result = Vec::with_capacity(count);
+        // `count` comes from the file; never reserve more records than the
+        // bytes after `start` can hold (a corrupt count once asked for 200 GB).
+        let fits = self.data.len().saturating_sub(start) / file_elem_sz;
+        let mut result = Vec::with_capacity(count.min(fits));
 
         for i in 0..count {
             let off = start + i * file_elem_sz;
@@ -533,7 +582,7 @@ impl<'data> M3File<'data> {
                 buf[40..44].copy_from_slice(&default_uv_multiply.to_le_bytes());
             }
 
-            let region: Regn = unsafe { std::ptr::read(buf.as_ptr() as *const Regn) };
+            let region: Regn = bytemuck::pod_read_unaligned(&buf);
             result.push(region);
         }
 
@@ -608,8 +657,10 @@ impl<'data> M3File<'data> {
             .collect()
     }
 
-    /// Offset of the named layer inside MAT_ for the given version.
-    fn mat_layer_offset(version: u32, layer: &str) -> Option<usize> {
+    /// Offset of the named layer reference inside a `MAT_` record of the given
+    /// version (`"diff"`, `"norm"`, `"emis1"`, `"ao"`, …), or `None` for a
+    /// layer that version does not have. Unknown versions use the v20 layout.
+    pub fn mat_layer_offset(version: u32, layer: &str) -> Option<usize> {
         match version {
             15 => match layer {
                 "diff" => Some(52),
@@ -627,7 +678,7 @@ impl<'data> M3File<'data> {
                 "ao" => Some(196),
                 _ => None,
             },
-            16 | 17 | 18 => match layer {
+            16..=18 => match layer {
                 "diff" => Some(52),
                 "decal" => Some(64),
                 "spec" => Some(76),
@@ -703,16 +754,7 @@ impl<'data> M3File<'data> {
         let tag_idx = self.find_tag(b"_TAM")?;
         let entry = &self.tags[tag_idx];
         let version = entry.version;
-        let file_elem_sz: usize = match version {
-            15 => 268,
-            16 | 17 | 18 => 280,
-            19 => 340,
-            20 => 352,
-            v => {
-                debug!("MAT_ unknown v{}", v);
-                352
-            }
-        };
+        let file_elem_sz = mat_record_size(version);
         let base = entry.offset as usize + mat_idx * file_elem_sz;
         let end = base + field_offset + 4;
         if end > self.data.len() {
@@ -744,16 +786,7 @@ impl<'data> M3File<'data> {
         let entry = &self.tags[tag_idx];
         let version = entry.version;
 
-        let file_elem_sz: usize = match version {
-            15 => 268,
-            16 | 17 | 18 => 280,
-            19 => 340,
-            20 => 352,
-            v => {
-                debug!("MAT_ unknown v{}", v);
-                352
-            }
-        };
+        let file_elem_sz = mat_record_size(version);
 
         let layer_off = Self::mat_layer_offset(version, layer)?;
 
@@ -888,16 +921,6 @@ impl<'data> M3File<'data> {
         Some([r, g, b, a])
     }
 
-    /// Reference to layer_diff for material `mat_idx`. Backwards-compat helper.
-    pub fn mat_layer_diff_ref(&self, mat_idx: usize) -> Option<Reference> {
-        self.mat_layer_ref(mat_idx, "diff")
-    }
-
-    /// Diffuse texture path for material `mat_idx`. Backwards-compat helper.
-    pub fn diffuse_texture_path(&self, mat_idx: usize) -> Result<String> {
-        self.texture_path_for_layer(mat_idx, "diff")
-    }
-
     /// Read `uv_tiling.default` from a Layer pointed at by the Reference.
     /// Vec2AnimRef: header(8) + default_x(4) + default_y(4) + ...
     /// Returns `(tiling_x, tiling_y)`, defaulting to (1.0, 1.0).
@@ -914,13 +937,7 @@ impl<'data> M3File<'data> {
         let version = entry.version;
         let start = entry.offset as usize;
 
-        // uv_tiling offset inside LAYR per version.
-        let uv_tiling_off: usize = match version {
-            20 | 21 | 22 => 244,
-            23 => 244,           // triplanar is added AFTER color_brightness
-            24 | 25 | 26 => 252, // +noise_amplitude(4)+noise_frequency(4)
-            _ => 244,
-        };
+        let uv_tiling_off = layr_uv_tiling_offset(version);
 
         // Vec2AnimRef.default starts at +8 (after the header).
         let default_off = start + uv_tiling_off + 8;
@@ -950,44 +967,6 @@ impl<'data> M3File<'data> {
         (tx, ty)
     }
 
-    // Backwards-compat helper.
-    pub fn read_layer(&self, r: &Reference) -> Result<Option<Layr>> {
-        if r.entries == 0 {
-            return Ok(None);
-        }
-        let tag_idx = r.index as usize;
-        if tag_idx >= self.tags.len() {
-            return Ok(None);
-        }
-
-        let entry = &self.tags[tag_idx];
-        let version = entry.version;
-        let file_elem_sz: usize = match version {
-            20 | 21 | 22 => 356,
-            23 => 428,
-            24 => 436,
-            25 => 468,
-            26 => 464,
-            v => {
-                debug!("LAYR unknown v{}", v);
-                356
-            }
-        };
-
-        let start = entry.offset as usize;
-        if start + file_elem_sz > self.data.len() {
-            return Ok(None);
-        }
-
-        let raw = &self.data[start..start + file_elem_sz];
-        let our_sz = std::mem::size_of::<Layr>(); // 356
-        let mut buf = [0u8; 356];
-        buf[..file_elem_sz.min(our_sz)].copy_from_slice(&raw[..file_elem_sz.min(our_sz)]);
-
-        let layer: Layr = unsafe { std::ptr::read(buf.as_ptr() as *const Layr) };
-        Ok(Some(layer))
-    }
-
     // ── Animations (SEQS / STG_ / STC_) ─────────────────────────────────────
 
     /// MODL.sequences (offset 16) → SEQS array. Supports versions v1 (96 bytes)
@@ -1011,6 +990,8 @@ impl<'data> M3File<'data> {
             _ => our_sz,                        // v2 = 92
         };
 
+        let fits = self.data.len().saturating_sub(start) / file_elem_sz;
+        ensure!(count <= fits, "SEQS: {} records do not fit in the file", count);
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             let off = start + i * file_elem_sz;
@@ -1025,7 +1006,7 @@ impl<'data> M3File<'data> {
                 buf[..our_sz.min(file_elem_sz)]
                     .copy_from_slice(&raw[..our_sz.min(file_elem_sz)]);
             }
-            let s: Seqs = unsafe { std::ptr::read(buf.as_ptr() as *const Seqs) };
+            let s: Seqs = bytemuck::pod_read_unaligned(&buf);
             out.push(s);
         }
         Ok(out)
@@ -1125,6 +1106,7 @@ impl<'data> M3File<'data> {
         self.tags.iter().position(|t| t.tag_bytes() == *tag_le)
     }
 
+    /// Log every tag (index, name, offset, count) at `debug` level.
     pub fn dump_tags(&self) {
         for (i, tag) in self.tags.iter().enumerate() {
             let tb = tag.tag_bytes();
@@ -1136,6 +1118,7 @@ impl<'data> M3File<'data> {
         }
     }
 
+    /// Header variant the file was written with.
     pub fn version(&self) -> M3Version {
         self.version
     }
@@ -1169,7 +1152,7 @@ impl<'data> M3File<'data> {
             self.data.len()
         );
         ensure!(
-            byte_len % elem_sz == 0,
+            byte_len.is_multiple_of(elem_sz),
             "byte_len {} is not a multiple of elem_sz {}",
             byte_len,
             elem_sz
@@ -1239,21 +1222,16 @@ impl<'data> M3File<'data> {
         from_utf8(bytes).map_err(|e| anyhow::anyhow!("invalid UTF-8: {e}"))
     }
 
-    /// Copy bytes into a `Vec<T>` while honouring alignment.
+    /// Copy bytes into a `Vec<T>`. The mmap gives no alignment guarantee for
+    /// a tag's payload, so fall back to per-element unaligned reads when the
+    /// slice cannot be reinterpreted in place.
     fn copy_aligned<T: bytemuck::Pod>(&self, raw: &[u8]) -> Vec<T> {
-        let elem_sz = std::mem::size_of::<T>();
         match bytemuck::try_cast_slice::<u8, T>(raw) {
             Ok(slice) => slice.to_vec(),
-            Err(_) => {
-                debug!("copy_aligned: unaligned, {} bytes", raw.len());
-                let mut out = Vec::with_capacity(raw.len() / elem_sz);
-                for chunk in raw.chunks_exact(elem_sz) {
-                    // SAFETY: T: Pod, chunk is the right size; we use unaligned read.
-                    let val = unsafe { std::ptr::read_unaligned(chunk.as_ptr() as *const T) };
-                    out.push(val);
-                }
-                out
-            }
+            Err(_) => raw
+                .chunks_exact(std::mem::size_of::<T>())
+                .map(bytemuck::pod_read_unaligned)
+                .collect(),
         }
     }
 }

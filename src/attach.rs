@@ -33,7 +33,7 @@
 //! numbers same-named attachments (`Ref_Weapon` ×3). Each attachment already
 //! has its own node, so the disambiguation an engine needs is the node itself.
 
-use crate::fx::Obj;
+use crate::json::Obj;
 use crate::m3::reader::M3File;
 use crate::m3::structures::Atvl;
 use tracing::debug;
@@ -75,7 +75,7 @@ impl Attachment {
             let mut vol = Obj::new();
             vol.string("shape", v.shape);
             vol.vec3("size", v.size);
-            vol.raw("matrix", &mat_json(&v.matrix));
+            vol.raw("matrix", &crate::json::nums(&v.matrix));
             body.raw("volume", &vol.finish());
         }
 
@@ -130,16 +130,4 @@ fn volume_of(v: &Atvl) -> Volume {
             m.w.x, m.w.y, m.w.z, m.w.w,
         ],
     }
-}
-
-fn mat_json(m: &[f32; 16]) -> String {
-    let mut s = String::from("[");
-    for (i, v) in m.iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        s.push_str(&crate::fx::num(*v));
-    }
-    s.push(']');
-    s
 }

@@ -7,6 +7,7 @@ mod transform;
 pub use soa::MeshDataSoA;
 
 use crate::m3::reader::M3File;
+use crate::m3::structures::{Bat, Bone, Regn};
 use anyhow::Result;
 use rayon::prelude::*;
 use tracing::debug;
@@ -42,30 +43,36 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 
     // Gather regions / indices / batches sequentially (M3File is not Sync),
     // then convert each Division in parallel via rayon.
-    type DivPayload = (Vec<crate::m3::structures::Regn>, u32, Vec<u16>, Vec<crate::m3::structures::Bat>);
-    let div_data: Vec<DivPayload> = divisions
+    let div_data: Vec<DivisionData> = divisions
         .iter()
         .map(|div| {
             let (regions, regn_version) = m3.regions(div)?;
-            let indices = m3.face_indices(div)?;
-            let batches = m3.batches(div).unwrap_or_default();
-            Ok((regions, regn_version, indices, batches))
+            Ok(DivisionData {
+                regions,
+                regn_version,
+                indices: m3.face_indices(div)?,
+                batches: m3.batches(div).unwrap_or_default(),
+            })
         })
         .collect::<Result<_>>()?;
 
+    let shared = SharedGeometry {
+        vertex_data: &vertex_data,
+        stride,
+        offsets: &offsets,
+        resolved_refs: &resolved_refs,
+        bone_lookup: &bone_lookup,
+        bones: &bones,
+    };
     div_data
         .into_par_iter()
         .enumerate()
-        .map(|(div_idx, (regions, regn_version, indices, batches))| {
+        .map(|(div_idx, div)| {
             debug!(
                 "converting Division #{} ({} regions v{}, {} batches)",
-                div_idx, regions.len(), regn_version, batches.len()
+                div_idx, div.regions.len(), div.regn_version, div.batches.len()
             );
-            let mut soa = convert_division(
-                &vertex_data, stride, &offsets,
-                &regions, regn_version, &indices, &batches, &resolved_refs,
-                &bone_lookup, &bones,
-            )?;
+            let mut soa = convert_division(&shared, &div)?;
             // M3 stores models Z-up; glTF is Y-up. Bake the -90° rotation
             // around X into positions / normals / tangents / AABB. For
             // skinned meshes glb/mod.rs applies the same rotation to root
@@ -190,43 +197,49 @@ impl VertexOffsets {
 /// look: skip geometry that is off in the rest pose. (The reference importer
 /// shows everything regardless of pose — that's not the in-game appearance.)
 fn region_hidden_by_default(
-    region:       &crate::m3::structures::Regn,
+    region:       &Regn,
     regn_version: u32,
-    batch:        Option<&crate::m3::structures::Bat>,
-    bones:        &[crate::m3::structures::Bone],
+    batch:        Option<&Bat>,
+    bones:        &[Bone],
 ) -> bool {
     // REGN v4+ explicit flags: 0x1 hidden, 0x2 placeholder.
     if regn_version >= 4 && (region.flags & 0x3) != 0 {
         return true;
     }
-    if let Some(b) = batch {
-        if b.bone >= 0 {
-            if let Some(bone) = bones.get(b.bone as usize) {
-                let h = &bone.batching.header;
-                let animated = h.flags != 0 || h.id != 0;
-                if animated && bone.batching.default == 0 {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    let Some(bone) = batch
+        .and_then(|b| usize::try_from(b.bone).ok())
+        .and_then(|i| bones.get(i))
+    else {
+        return false;
+    };
+    let h = &bone.batching.header;
+    let animated = h.flags != 0 || h.id != 0;
+    animated && bone.batching.default == 0
 }
 
 // ─── Single-Division conversion ──────────────────────────────────────────────
 
-fn convert_division(
-    vertex_data:  &[u8],
-    stride:       usize,
-    offsets:      &VertexOffsets,
-    regions:      &[crate::m3::structures::Regn],
+/// Model-wide inputs every division reads.
+struct SharedGeometry<'a> {
+    vertex_data:   &'a [u8],
+    stride:        usize,
+    offsets:       &'a VertexOffsets,
+    resolved_refs: &'a [Option<usize>],
+    bone_lookup:   &'a [u16],
+    bones:         &'a [Bone],
+}
+
+/// One division's own records.
+struct DivisionData {
+    regions:      Vec<Regn>,
     regn_version: u32,
-    indices:       &[u16],
-    batches:       &[crate::m3::structures::Bat],
-    resolved_refs: &[Option<usize>],
-    bone_lookup:   &[u16],
-    bones:         &[crate::m3::structures::Bone],
-) -> Result<MeshDataSoA> {
+    indices:      Vec<u16>,
+    batches:      Vec<Bat>,
+}
+
+fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<MeshDataSoA> {
+    let SharedGeometry { vertex_data, stride, offsets, resolved_refs, bone_lookup, bones } = *shared;
+    let DivisionData { ref regions, regn_version, ref indices, ref batches } = *div;
     let mut soa = MeshDataSoA::new();
 
     // Material→region binding. m3studio (io_m3_import.py:1056) collects ALL
@@ -282,7 +295,8 @@ fn convert_division(
         if skip { continue; }
 
         // Positions (offset=0 always).
-        transform::extract_positions_to_soa(vertex_data, first, count, stride, &mut soa)?;
+        let span = transform::VertexSpan { data: vertex_data, first, count, stride };
+        transform::extract_positions_to_soa(span, &mut soa)?;
 
         // Skinning — JOINTS_0/WEIGHTS_0. The bone_lookup window for the region:
         //   region_lookup = bone_lookup[first_bone_lookup_index..+bone_lookup_count]
@@ -293,14 +307,12 @@ fn convert_division(
             let lk_count = region.bone_lookup_count as usize;
             let lk_end   = (lk_start + lk_count).min(bone_lookup.len());
             let region_lookup = &bone_lookup[lk_start.min(bone_lookup.len())..lk_end];
-            transform::decode_skin(
-                vertex_data, first, count, stride, layout, region_lookup, &mut soa,
-            )?;
+            transform::decode_skin(span, layout, region_lookup, &mut soa)?;
         }
 
         // Normals.
         if let Some(normal_off) = offsets.normal {
-            transform::decode_normals_simd(vertex_data, first, count, stride, normal_off, &mut soa)?;
+            transform::decode_normals_simd(span, normal_off, &mut soa)?;
         } else {
             for _ in 0..count {
                 soa.normals_x.push(0.0);
@@ -313,9 +325,7 @@ fn convert_division(
         // byte of the *normal* block, not the tangent block — pass the normal
         // offset through so `decode_tangents` can read it.
         if let Some(tangent_off) = offsets.tangent {
-            transform::decode_tangents(
-                vertex_data, first, count, stride, tangent_off, offsets.normal, &mut soa,
-            )?;
+            transform::decode_tangents(span, tangent_off, offsets.normal, &mut soa)?;
         } else {
             for _ in 0..count {
                 soa.tangents_x.push(1.0);
@@ -332,10 +342,7 @@ fn convert_division(
             let uv_offset = region.uv_offset;
 
             if let Some(uv_off) = offsets.uv0 {
-                transform::decode_uvs(
-                    vertex_data, first, count, stride, uv_off,
-                    uv_multiply, uv_offset, &mut soa,
-                )?;
+                transform::decode_uvs(span, uv_off, uv_multiply, uv_offset, &mut soa)?;
             } else {
                 for _ in 0..count {
                     soa.uvs_u.push(0.0);
@@ -347,17 +354,22 @@ fn convert_division(
         // Indices. For REGN v≤2 indices are absolute (relative to the vertex
         // buffer); we subtract `first_vertex_index` to make them region-local
         // (see m3studio io_m3_import.py:1066-1068).
+        //
+        // A triangle that reaches outside its region's vertices is dropped:
+        // glTF forbids out-of-range indices, and in a real file it can only
+        // mean corruption.
         let fi = region.first_face_index as usize;
         let ni = region.face_count as usize;
         let index_start = soa.indices.len();
-        if fi + ni <= indices.len() {
+        if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
             let base = soa.base_vertex_for_region() as u32;
             let abs_to_local: u32 = if regn_version <= 2 { region.first_vertex_index } else { 0 };
-            soa.indices.extend(
-                indices[fi..fi + ni]
-                    .iter()
-                    .map(|&i| (i as u32).saturating_sub(abs_to_local) + base),
-            );
+            let local = |i: u16| u32::from(i).checked_sub(abs_to_local).filter(|&l| l < count as u32);
+            for tri in faces.chunks_exact(3) {
+                if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
+                    soa.indices.extend([a + base, b + base, c + base]);
+                }
+            }
         }
         let index_count = soa.indices.len() - index_start;
         soa.commit_region();

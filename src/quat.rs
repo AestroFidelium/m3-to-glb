@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn clamp_preserves_already_unit() {
-        let q = normalize_and_clamp([0.0, 0.7071068, 0.0, 0.7071068]);
+        let q = normalize_and_clamp([0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2]);
         assert!((len(q) - 1.0).abs() < 1e-5);
     }
 }

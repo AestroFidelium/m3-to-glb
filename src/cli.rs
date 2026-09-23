@@ -1,6 +1,7 @@
-/// CLI definition and styling for `--help`.
+//! CLI definition and styling for `--help`.
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, Parser};
+use clap_complete::Shell;
 
 /// Custom style: yellow headers, cyan flags, green placeholders.
 pub fn cli_styles() -> Styles {
@@ -27,8 +28,8 @@ pub fn cli_styles() -> Styles {
 )]
 pub struct Cli {
     /// Path to the input `.m3` file
-    #[arg(value_name = "INPUT")]
-    pub input: String,
+    #[arg(value_name = "INPUT", required_unless_present = "completions")]
+    pub input: Option<String>,
 
     /// Output `.glb` path. Defaults to the input path with a `.glb` extension.
     #[arg(short, long, value_name = "OUTPUT")]
@@ -84,4 +85,8 @@ pub struct Cli {
     /// Log level (off, error, warn, info, debug, trace). Default: warn.
     #[arg(short, long, default_value = "warn", value_name = "LEVEL")]
     pub verbose: String,
+
+    /// Print a shell completion script to stdout and exit.
+    #[arg(long, value_name = "SHELL", exclusive = true)]
+    pub completions: Option<Shell>,
 }

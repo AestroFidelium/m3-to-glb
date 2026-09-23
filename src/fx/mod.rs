@@ -38,6 +38,7 @@ pub mod curves;
 
 use curves::FxCurves;
 
+use crate::json::{Obj, num};
 use crate::m3::reader::M3File;
 use crate::m3::structures::{Col, Lite, Par, Proj};
 
@@ -631,78 +632,6 @@ fn pick(table: &[&'static str], i: u32) -> &'static str {
 /// Replace a non-positive or non-finite value with a sane fallback.
 fn nz(v: f32, fallback: f32) -> f32 {
     if v.is_finite() && v > 0.0 { v } else { fallback }
-}
-
-/// JSON number, never `NaN` / `Infinity` — neither is valid JSON, and either
-/// one inside the JSON chunk makes the whole GLB unreadable.
-pub(crate) fn num(v: f32) -> String {
-    if !v.is_finite() {
-        return "0".to_owned();
-    }
-    if v == v.trunc() && v.abs() < 1e9 {
-        return format!("{}", v as i64);
-    }
-    format!("{v}")
-}
-
-/// A minimal JSON object writer — the same string-concatenation approach the
-/// glTF manifest builder uses, so effects add no serialisation dependency.
-pub(crate) struct Obj {
-    s:     String,
-    first: bool,
-}
-
-impl Obj {
-    pub(crate) fn new() -> Self {
-        Self { s: String::from("{"), first: true }
-    }
-    pub(crate) fn key(&mut self, k: &str) {
-        if !self.first {
-            self.s.push(',');
-        }
-        self.first = false;
-        self.s.push('"');
-        self.s.push_str(k);
-        self.s.push_str("\":");
-    }
-    pub(crate) fn raw(&mut self, k: &str, v: &str) {
-        self.key(k);
-        self.s.push_str(v);
-    }
-    pub(crate) fn num(&mut self, k: &str, v: f32) {
-        self.key(k);
-        self.s.push_str(&num(v));
-    }
-    pub(crate) fn int(&mut self, k: &str, v: u64) {
-        self.key(k);
-        self.s.push_str(&v.to_string());
-    }
-    pub(crate) fn bool(&mut self, k: &str, v: bool) {
-        self.key(k);
-        self.s.push_str(if v { "true" } else { "false" });
-    }
-    pub(crate) fn string(&mut self, k: &str, v: &str) {
-        self.key(k);
-        // Effect strings are engine identifiers and sanitized bone names, but
-        // escape defensively: an unescaped quote would corrupt the whole GLB.
-        self.s.push_str(&format!("{v:?}"));
-    }
-    pub(crate) fn vec2(&mut self, k: &str, v: [f32; 2]) {
-        self.raw(k, &format!("[{},{}]", num(v[0]), num(v[1])));
-    }
-    pub(crate) fn vec2i(&mut self, k: &str, v: [u8; 2]) {
-        self.raw(k, &format!("[{},{}]", v[0], v[1]));
-    }
-    pub(crate) fn vec3(&mut self, k: &str, v: [f32; 3]) {
-        self.raw(k, &format!("[{},{},{}]", num(v[0]), num(v[1]), num(v[2])));
-    }
-    pub(crate) fn vec4(&mut self, k: &str, v: [f32; 4]) {
-        self.raw(k, &format!("[{},{},{},{}]", num(v[0]), num(v[1]), num(v[2]), num(v[3])));
-    }
-    pub(crate) fn finish(mut self) -> String {
-        self.s.push('}');
-        self.s
-    }
 }
 
 /// Bone names come from the file and end up in a glTF node name; keep them to

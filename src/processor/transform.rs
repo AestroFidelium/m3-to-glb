@@ -8,13 +8,33 @@
 //!
 //! # M3 encoding
 //!
-//! - Normals: `[i8; 4]` SNORM8 → f32: `x / 127.0`
+//! - Normals: `[u8; 4]` → f32: `x / 255 * 2 - 1`, then renormalised
 //! - UV: `[i16; 2]` → f32: `x * region.uv_multiply / 32768 + region.uv_offset`
 
 use super::soa::MeshDataSoA;
 use anyhow::{Result, ensure};
 use multiversion::multiversion;
 use wide::f32x8;
+
+/// A run of vertices inside the interleaved M3 vertex buffer: `count`
+/// vertices of `stride` bytes each, starting at vertex `first`.
+#[derive(Debug, Clone, Copy)]
+pub struct VertexSpan<'a> {
+    pub data:   &'a [u8],
+    pub first:  usize,
+    pub count:  usize,
+    pub stride: usize,
+}
+
+/// Whether every vertex of `span` lies inside its buffer. Each decoder checks
+/// this once up front (together with its component fitting in the stride), so
+/// the per-vertex loops index without further checks.
+fn span_fits(span: VertexSpan<'_>) -> bool {
+    span.first
+        .checked_add(span.count)
+        .and_then(|n| n.checked_mul(span.stride))
+        .is_some_and(|end| end <= span.data.len())
+}
 
 /// Normal-decoding constant: 1.0 / 255.0 (uint8 → float, M3 format).
 const SNORM8_SCALE: f32 = 1.0 / 255.0;
@@ -23,25 +43,18 @@ const SNORM8_SCALE: f32 = 1.0 / 255.0;
 
 /// Extract vertex positions from the AoS buffer into the SoA buffers.
 /// SIMD via multiversion (AVX2 / SSE4.1 / scalar fallback).
-pub fn extract_positions_to_soa(
-    vertex_data: &[u8],
-    first_vertex: usize,
-    vertex_count: usize,
-    vertex_stride: usize,
-    soa: &mut MeshDataSoA,
-) -> Result<()> {
+pub fn extract_positions_to_soa(span: VertexSpan<'_>, soa: &mut MeshDataSoA) -> Result<()> {
+    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= 12,
         "vertex_stride {} too small for position (need ≥ 12)",
         vertex_stride
     );
 
-    let end_byte = (first_vertex + vertex_count) * vertex_stride;
     ensure!(
-        end_byte <= vertex_data.len(),
-        "vertex buffer out of bounds: need {} bytes, have {}",
-        end_byte,
-        vertex_data.len()
+        span_fits(span),
+        "vertex buffer out of bounds: vertices {}..{} of {} bytes each, buffer has {}",
+        first_vertex, first_vertex + vertex_count, vertex_stride, vertex_data.len()
     );
 
     soa.reserve(vertex_count, 0);
@@ -53,10 +66,11 @@ pub fn extract_positions_to_soa(
 
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride;
-        // SAFETY: end_byte <= vertex_data.len() was verified above.
-        let x = f32::from_le_bytes(vertex_data[base..base + 4].try_into().unwrap());
-        let y = f32::from_le_bytes(vertex_data[base + 4..base + 8].try_into().unwrap());
-        let z = f32::from_le_bytes(vertex_data[base + 8..base + 12].try_into().unwrap());
+        // In bounds: `span_fits` was verified above.
+        let [x, y, z]: [f32; 3] = bytemuck::pod_read_unaligned(&vertex_data[base..base + 12]);
+        // glTF positions must be finite (and the accessor min/max are JSON).
+        let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+        let (x, y, z) = (finite(x), finite(y), finite(z));
         xs.push(x);
         ys.push(y);
         zs.push(z);
@@ -155,13 +169,11 @@ fn compute_aabb_simd(xs: &[f32], ys: &[f32], zs: &[f32]) -> ([f32; 3], [f32; 3])
 ///
 /// SIMD: 8 normals per iteration via `wide::f32x8`.
 pub fn decode_normals_simd(
-    vertex_data: &[u8],
-    first_vertex: usize,
-    vertex_count: usize,
-    vertex_stride: usize,
+    span: VertexSpan<'_>,
     component_offset: usize, // normal offset inside the vertex (from vertex_flags)
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
+    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {} too small for normals (offset={})",
@@ -173,9 +185,9 @@ pub fn decode_normals_simd(
     let mut raw_ny: Vec<f32> = Vec::with_capacity(vertex_count);
     let mut raw_nz: Vec<f32> = Vec::with_capacity(vertex_count);
 
+    ensure!(span_fits(span), "normal data out of bounds");
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride + component_offset;
-        ensure!(base + 4 <= vertex_data.len(), "normal data out of bounds");
 
         // uint8 → f32; we normalise to [-1..1] via `*2-1` below.
         let nx = vertex_data[base] as f32;
@@ -208,18 +220,12 @@ pub fn decode_normals_simd(
         let x = nx_f[i];
         let y = ny_f[i];
         let z = nz_f[i];
-        let len_sq = x * x + y * y + z * z;
-        if len_sq > 1e-8 {
-            let inv_len = 1.0 / len_sq.sqrt();
-            nx_f[i] = x * inv_len;
-            ny_f[i] = y * inv_len;
-            nz_f[i] = z * inv_len;
-        } else {
-            // Zero-length normal — substitute an up vector.
-            nx_f[i] = 0.0;
-            ny_f[i] = 1.0;
-            nz_f[i] = 0.0;
-        }
+        // Never zero: `b / 255 * 2 - 1` is at least 1/255 away from 0 for
+        // every byte `b`, so the shortest decodable vector has length ~0.007.
+        let inv_len = 1.0 / (x * x + y * y + z * z).sqrt();
+        nx_f[i] = x * inv_len;
+        ny_f[i] = y * inv_len;
+        nz_f[i] = z * inv_len;
     }
 
     soa.normals_x.extend_from_slice(&nx_f);
@@ -245,14 +251,12 @@ use super::SkinLayout;
 /// glTF JOINTS_0 / WEIGHTS_0 are always VEC4 — for 2-pair models (skin0
 /// only or skin1 only) slots 2..3 are filled with index 0 and weight 0.
 pub fn decode_skin(
-    vertex_data:   &[u8],
-    first_vertex:  usize,
-    vertex_count:  usize,
-    vertex_stride: usize,
+    span:          VertexSpan<'_>,
     layout:        SkinLayout,
     region_lookup: &[u16],
     soa:           &mut MeshDataSoA,
 ) -> Result<()> {
+    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     let SkinLayout { weights_offset, lookups_offset, pairs } = layout;
     ensure!(
         pairs <= 4,
@@ -269,15 +273,11 @@ pub fn decode_skin(
     soa.joints.reserve(vertex_count);
     soa.weights.reserve(vertex_count);
 
+    ensure!(span_fits(span), "skin data out of bounds");
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride;
         let w_off = base + weights_offset;
         let l_off = base + lookups_offset;
-        ensure!(
-            w_off + pairs <= vertex_data.len() && l_off + pairs <= vertex_data.len(),
-            "skin data out of bounds at vertex {}",
-            first_vertex + i
-        );
 
         let mut joints  = [0u16; 4];
         let mut weights = [0u8; 4];
@@ -321,14 +321,12 @@ pub fn decode_skin(
 /// is `None` when the mesh has no compressed normal (in which case we fall
 /// back to +1, since there is no face winding hint to consult).
 pub fn decode_tangents(
-    vertex_data: &[u8],
-    first_vertex: usize,
-    vertex_count: usize,
-    vertex_stride: usize,
+    span: VertexSpan<'_>,
     component_offset: usize,
     normal_offset: Option<usize>,
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
+    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {} too small for tangent (offset={})",
@@ -344,9 +342,9 @@ pub fn decode_tangents(
         );
     }
 
+    ensure!(span_fits(span), "tangent data out of bounds");
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride + component_offset;
-        ensure!(base + 4 <= vertex_data.len(), "tangent data out of bounds");
 
         let tx_raw = vertex_data[base] as f32;
         let ty_raw = vertex_data[base + 1] as f32;
@@ -366,14 +364,9 @@ pub fn decode_tangents(
             None => 1.0_f32,
         };
 
-        // Normalise the xyz part.
-        let len_sq = tx * tx + ty * ty + tz * tz;
-        let (tx, ty, tz) = if len_sq > 1e-8 {
-            let inv = 1.0 / len_sq.sqrt();
-            (tx * inv, ty * inv, tz * inv)
-        } else {
-            (1.0, 0.0, 0.0)
-        };
+        // Normalise the xyz part (never zero-length — see `decode_normals_simd`).
+        let inv = 1.0 / (tx * tx + ty * ty + tz * tz).sqrt();
+        let (tx, ty, tz) = (tx * inv, ty * inv, tz * inv);
 
         soa.tangents_x.push(tx);
         soa.tangents_y.push(ty);
@@ -396,15 +389,13 @@ pub fn decode_tangents(
 /// Empirically: with the flip, tree textures swap (the trunk picks up the
 /// foliage texture and vice versa) — a clear signal it's wrong here.
 pub fn decode_uvs(
-    vertex_data: &[u8],
-    first_vertex: usize,
-    vertex_count: usize,
-    vertex_stride: usize,
+    span: VertexSpan<'_>,
     component_offset: usize,
     uv_multiply: f32,
     uv_offset: f32,
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
+    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {} too small for UV (offset={})",
@@ -412,15 +403,17 @@ pub fn decode_uvs(
         component_offset
     );
     let scale: f32 = uv_multiply / 32768.0;
+    ensure!(span_fits(span), "UV data out of bounds");
     for i in 0..vertex_count {
         let base = (first_vertex + i) * vertex_stride + component_offset;
-        ensure!(base + 4 <= vertex_data.len(), "UV data out of bounds");
 
         let u_raw = i16::from_le_bytes([vertex_data[base], vertex_data[base + 1]]);
         let v_raw = i16::from_le_bytes([vertex_data[base + 2], vertex_data[base + 3]]);
 
-        soa.uvs_u.push(u_raw as f32 * scale + uv_offset);
-        soa.uvs_v.push(v_raw as f32 * scale + uv_offset);
+        // A corrupt region's multiply/offset can be non-finite.
+        let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+        soa.uvs_u.push(finite(u_raw as f32 * scale + uv_offset));
+        soa.uvs_v.push(finite(v_raw as f32 * scale + uv_offset));
     }
     let dbg_start = soa.uvs_u.len().saturating_sub(vertex_count);
     for i in 0..vertex_count.min(3) {

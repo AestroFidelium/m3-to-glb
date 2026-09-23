@@ -1,5 +1,6 @@
 /target/
 **/*.rs.bk
+/result
 
 .direnv/
 .ezrc
@@ -13,3 +14,8 @@
 !flake.nix
 !flake.lock
 !.cargo/
+!.github/
+
+# Fuzzer working corpora are large and regenerate on every run; crash
+# reproducers (`tests/__fuzz__/*/crashes/`) are kept as regression inputs.
+tests/__fuzz__/*/corpus/

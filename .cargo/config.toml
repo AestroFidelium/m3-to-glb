@@ -21,3 +21,9 @@ codegen-backend = true
 
 [build]
 rustflags = ["-Z", "polonius"]
+
+# `cargo bolero test --profile fuzz` — the fuzz profile inherits `dev` and with
+# it the cranelift backend above, which rejects the LLVM sanitizer-coverage
+# flags libfuzzer needs (`Unknown option -sanitizer-coverage-inline-8bit-counters`).
+[profile.fuzz]
+codegen-backend = "llvm"

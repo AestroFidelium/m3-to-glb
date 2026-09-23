@@ -48,19 +48,20 @@
 
         m3-to-glb = rustPlatform.buildRustPackage {
           pname = "m3-to-glb";
-          version = "0.1.0";
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
           src = pkgs.lib.cleanSource ./.;
           # NOT `cargoLock.lockFile`: that path vendors through `importCargoLock`,
           # which downloads every crate from `crates.io/api/v1/crates/...` with
           # nixpkgs' fetchurl User-Agent (`curl/X Nixpkgs/Y`) — and crates.io now
           # answers 403 to any `curl/*` UA, so every crate fails to fetch.
           # `cargoHash` goes through `fetchCargoVendor`, which pulls from the
-          # `static.crates.io` CDN instead. Re-run with `cargoHash = "";` and copy
+          # `static.crates.io` CDN instead. Re-run with `cargoHash = "sha256-cn4LD4kpu6f3Bc0eCMkUEty+DH70xD2YyqT76RQ2tl4=";` and copy
           # the reported hash whenever Cargo.lock changes.
-          cargoHash = "sha256-ZAp8ZHj1aYZG+ziYFtWcdzKBeOv1Z8mlpZ/xcXVhnQM=";
+          cargoHash = "sha256-cn4LD4kpu6f3Bc0eCMkUEty+DH70xD2YyqT76RQ2tl4=";
 
           # `.cargo/config.toml` pins clang + mold as the linker.
-          # `installShellFiles` ships the zsh completions emitted by build.rs.
+          # `installShellFiles` ships the completions the binary prints with
+          # `--completions <shell>`.
           # `makeWrapper` injects `toktx` into PATH so `--ktx2` works without
           # the user installing KTX-Software separately.
           nativeBuildInputs = [
@@ -70,11 +71,13 @@
             pkgs.makeWrapper
           ];
 
-          # `build.rs` generates `completions/_m3-to-glb` next to the source.
-          # Drop it into `$out/share/zsh/site-functions/` — the standard fpath.
-          # Wrap the binary so `toktx` (KTX-Software) is on PATH at runtime.
+          # Completions come from the binary itself; wrap it afterwards so
+          # `toktx` (KTX-Software) is on PATH at runtime.
           postInstall = ''
-            installShellCompletion --zsh completions/_m3-to-glb
+            installShellCompletion --cmd m3-to-glb \
+              --bash <($out/bin/m3-to-glb --completions bash) \
+              --fish <($out/bin/m3-to-glb --completions fish) \
+              --zsh  <($out/bin/m3-to-glb --completions zsh)
             wrapProgram $out/bin/m3-to-glb \
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ktx-tools ]}
           '';

@@ -22,6 +22,7 @@
 //!   - translation: `T' = R · T` (rotate the vector)
 //!   - rotation:    `Q' = R_quat ⊗ Q` (compose quaternions)
 //!   - scale:       unchanged
+//!
 //! Without this the root bone animates "past" the rotated mesh.
 
 use crate::m3::reader::M3File;
@@ -102,22 +103,30 @@ impl StcLookup {
 }
 
 /// Drop duplicate timestamps (m3studio does the same — io_m3_import.py:714-720).
-/// Returns the indices to keep.
-fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
-    let mut times = Vec::with_capacity(frames_ms.len());
+/// Returns the times in seconds and the key indices to keep.
+///
+/// glTF requires sampler input to be *strictly* increasing. Real files only
+/// ever repeat a timestamp, but a corrupt one can step backwards; such a key is
+/// dropped rather than emitted as an invalid sampler.
+pub(crate) fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
+    let mut times: Vec<f32> = Vec::with_capacity(frames_ms.len());
     let mut keep = Vec::with_capacity(frames_ms.len());
-    let mut prev: Option<i32> = None;
     for (i, &ms) in frames_ms.iter().enumerate() {
-        if Some(ms) == prev {
-            // m3studio keeps the *last* sample sharing the same frame —
-            // we mirror that, rewriting the last `keep` entry.
-            if let Some(last) = keep.last_mut() {
-                *last = i;
+        // Compared as the f32 that is written: two distinct i32 milliseconds
+        // past ~4.6 hours round to the same f32.
+        let t = ms as f32 / 1000.0;
+        match times.last() {
+            Some(&prev) if t < prev => {}
+            // m3studio keeps the *last* sample sharing the same frame.
+            Some(&prev) if t == prev => {
+                if let Some(last) = keep.last_mut() {
+                    *last = i;
+                }
             }
-        } else {
-            times.push(ms as f32 / 1000.0);
-            keep.push(i);
-            prev = Some(ms);
+            _ => {
+                times.push(t);
+                keep.push(i);
+            }
         }
     }
     (times, keep)
@@ -258,56 +267,35 @@ fn build_one_animation(
 
     for (bi, bone) in bones.iter().enumerate() {
         let target_node = bone_node_base + bi;
-        let is_root = bone.parent < 0;
+        let is_root = bone.parent_index(bi).is_none();
 
-        // Translation. m3studio (`key_fcurves` in io_m3_import.py) filters
-        // only on the presence of the anim_id in STC, not on header.flags —
-        // flags are often 0 in the .m3 even for bones that *are* animated.
-        let loc_id = bone.location.header.id;
-        if loc_id != 0 {
-            if let Some((kind, idx)) = lookup.lookup(loc_id) {
-                if kind == ANIM_TYPE_VEC3 {
-                    if let Some(block) = sd3v_arr.get(idx as usize) {
-                        if let Some(samp) = build_vec3_sampler(m3, block, bone.location.header.interpolation, is_root, false)? {
-                            let s_idx = samplers.len();
-                            samplers.push(samp);
-                            channels.push(Channel { sampler: s_idx, target_node, path: Path::Translation });
-                        }
-                    }
-                }
+        // m3studio (`key_fcurves` in io_m3_import.py) filters only on the
+        // presence of the anim_id in STC, not on header.flags — flags are
+        // often 0 in the .m3 even for bones that *are* animated.
+        let tracks = [
+            (bone.location.header.id, ANIM_TYPE_VEC3, Path::Translation),
+            (bone.rotation.header.id, ANIM_TYPE_QUAT, Path::Rotation),
+            (bone.scale.header.id, ANIM_TYPE_VEC3, Path::Scale),
+        ];
+        for (anim_id, want_kind, path) in tracks {
+            if anim_id == 0 {
+                continue;
             }
-        }
-
-        // Rotation.
-        let rot_id = bone.rotation.header.id;
-        if rot_id != 0 {
-            if let Some((kind, idx)) = lookup.lookup(rot_id) {
-                if kind == ANIM_TYPE_QUAT {
-                    if let Some(block) = sd4q_arr.get(idx as usize) {
-                        if let Some(samp) = build_quat_sampler(m3, block, bone.rotation.header.interpolation, is_root)? {
-                            let s_idx = samplers.len();
-                            samplers.push(samp);
-                            channels.push(Channel { sampler: s_idx, target_node, path: Path::Rotation });
-                        }
-                    }
-                }
+            let Some((kind, idx)) = lookup.lookup(anim_id) else { continue };
+            if kind != want_kind {
+                continue;
             }
-        }
-
-        // Scale (always skip the root rotation bake — scale on the root
-        // doesn't get the rotation correction, only translation/rotation do).
-        let scl_id = bone.scale.header.id;
-        if scl_id != 0 {
-            if let Some((kind, idx)) = lookup.lookup(scl_id) {
-                if kind == ANIM_TYPE_VEC3 {
-                    if let Some(block) = sd3v_arr.get(idx as usize) {
-                        if let Some(samp) = build_vec3_sampler(m3, block, bone.scale.header.interpolation, false, true)? {
-                            let s_idx = samplers.len();
-                            samplers.push(samp);
-                            channels.push(Channel { sampler: s_idx, target_node, path: Path::Scale });
-                        }
-                    }
-                }
+            let idx = idx as usize;
+            // Only the root's translation and rotation carry the Z-up → Y-up
+            // bake; scale is axis-independent of it.
+            let sampler = match path {
+                Path::Translation => sd3v_arr.get(idx).and_then(|b| build_vec3_sampler(m3, b, is_root)),
+                Path::Rotation => sd4q_arr.get(idx).and_then(|b| build_quat_sampler(m3, b, is_root)),
+                Path::Scale => sd3v_arr.get(idx).and_then(|b| build_vec3_sampler(m3, b, false)),
+            };
+            if let Some(samp) = sampler {
+                channels.push(Channel { sampler: samplers.len(), target_node, path });
+                samplers.push(samp);
             }
         }
     }
@@ -328,13 +316,7 @@ fn build_one_animation(
     Ok(Some(Animation { name: anim_name, samplers, channels }))
 }
 
-fn build_vec3_sampler(
-    m3:           &M3File<'_>,
-    block:        &Sd3v,
-    _interpolation: u16,
-    apply_zy:     bool,
-    is_scale:     bool,
-) -> Result<Option<Sampler>> {
+fn build_vec3_sampler(m3: &M3File<'_>, block: &Sd3v, apply_zy: bool) -> Option<Sampler> {
     // m3studio (`io_m3_import.py:577`/`603`) hardcodes LINEAR for bone
     // translation/scale FCurves regardless of `header.interpolation`.
     // The M3 field reads 0 ("constant") for essentially every bone
@@ -343,7 +325,7 @@ fn build_vec3_sampler(
     // pop instead of smooth motion.
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
     let values    = m3.read_ref_vec3(&block.keys).unwrap_or_default();
-    if frames_ms.is_empty() || values.is_empty() { return Ok(None); }
+    if frames_ms.is_empty() || values.is_empty() { return None; }
     let n = frames_ms.len().min(values.len());
     let frames_ms = &frames_ms[..n];
     let values = &values[..n];
@@ -352,7 +334,7 @@ fn build_vec3_sampler(
     let mut data: Vec<[f32; 3]> = Vec::with_capacity(keep.len());
     for &i in &keep {
         let v = values[i];
-        let arr = if apply_zy && !is_scale {
+        let arr = if apply_zy {
             rotate_vec_by_quat([v.x, v.y, v.z], ZY_QUAT)
         } else {
             [v.x, v.y, v.z]
@@ -360,24 +342,19 @@ fn build_vec3_sampler(
         data.push(arr);
     }
 
-    Ok(Some(Sampler {
+    Some(Sampler {
         times_sec,
         data: SamplerData::Vec3(data),
         linear: true,
-    }))
+    })
 }
 
-fn build_quat_sampler(
-    m3:            &M3File<'_>,
-    block:         &Sd4q,
-    _interpolation: u16,
-    apply_zy:      bool,
-) -> Result<Option<Sampler>> {
+fn build_quat_sampler(m3: &M3File<'_>, block: &Sd4q, apply_zy: bool) -> Option<Sampler> {
     // See note in `build_vec3_sampler`: bone rotation always interpolates
     // LINEAR. m3studio does the same (`io_m3_import.py:590`).
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
     let values    = m3.read_ref_quat(&block.keys).unwrap_or_default();
-    if frames_ms.is_empty() || values.is_empty() { return Ok(None); }
+    if frames_ms.is_empty() || values.is_empty() { return None; }
     let n = frames_ms.len().min(values.len());
     let frames_ms = &frames_ms[..n];
     let values = &values[..n];
@@ -408,10 +385,10 @@ fn build_quat_sampler(
         }
     }
 
-    Ok(Some(Sampler {
+    Some(Sampler {
         times_sec,
         data: SamplerData::Quat(data),
         linear: true,
-    }))
+    })
 }
 

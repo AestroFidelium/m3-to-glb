@@ -27,6 +27,12 @@ pub struct TextureCache {
     normalizer: Option<AhoCorasick>,
 }
 
+impl std::fmt::Debug for TextureCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextureCache").field("textures", &self.map.len()).finish_non_exhaustive()
+    }
+}
+
 impl TextureCache {
     /// Empty cache (no texture directory provided).
     pub fn empty() -> Self {
@@ -74,7 +80,7 @@ impl TextureCache {
         let patterns = ["\\", "assets\\", "assets/", "textures\\", "textures/"];
         let normalizer = AhoCorasick::builder()
             .ascii_case_insensitive(true)
-            .build(&patterns)
+            .build(patterns)
             .ok();
 
         Ok(Self { map, normalizer })
@@ -113,8 +119,8 @@ impl TextureCache {
             .to_lowercase();
         let hash = xxh3_64(stem.as_bytes());
         let path = self.map.get(&hash)?;
-        let mime = mime_type_for_path(path);
-        Some((path, mime))
+        // Only files `texture_mime` accepted were indexed.
+        Some((path, texture_mime(path).unwrap_or("image/png")))
     }
 
     /// Normalise an M3 path: drop known prefixes, swap `\` for `/`.
@@ -144,30 +150,23 @@ fn collect_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 
         if path.is_dir() {
             collect_recursive(&path, out)?;
-        } else if is_texture_file(&path) {
+        } else if texture_mime(&path).is_some() {
             out.push(path);
         }
     }
     Ok(())
 }
 
-#[inline]
-fn is_texture_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("png" | "dds" | "tga" | "jpg" | "jpeg" | "bmp" | "PNG" | "DDS" | "TGA")
-    )
-}
-
-/// Pick a MIME type from the file extension.
-#[inline]
-fn mime_type_for_path(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("jpg") | Some("jpeg") | Some("JPG") | Some("JPEG") => "image/jpeg",
-        Some("png") | Some("PNG") => "image/png",
-        Some("dds") | Some("DDS") => "image/vnd-ms.dds",
-        Some("tga") | Some("TGA") => "image/x-tga",
-        Some("bmp") | Some("BMP") => "image/bmp",
-        _ => "image/png",
-    }
+/// MIME type of a texture file, by extension (any case), or `None` for a file
+/// that is not an image the converter can embed.
+fn texture_mime(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "dds" => "image/vnd-ms.dds",
+        "tga" => "image/x-tga",
+        "bmp" => "image/bmp",
+        _ => return None,
+    })
 }

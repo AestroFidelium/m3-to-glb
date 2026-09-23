@@ -638,6 +638,20 @@ pub struct BoneV1 {
 
 pub type Bone = BoneV1;
 
+impl BoneV1 {
+    /// Index of this bone's parent, given the bone's own index `me`, or `None`
+    /// for a root.
+    ///
+    /// M3 stores bones topologically sorted — a parent always precedes its
+    /// children. A parent index that does not (itself, or a later bone) can only
+    /// come from a corrupt file, and honouring it would turn the node hierarchy
+    /// into a cycle, which glTF forbids; such a bone is treated as a root.
+    #[must_use]
+    pub fn parent_index(&self, me: usize) -> Option<usize> {
+        usize::try_from(self.parent).ok().filter(|&p| p < me)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  IREF — BONE REST MATRIX
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2528,13 +2542,5 @@ impl MdIndexEntry {
     #[inline]
     pub fn tag_bytes(&self) -> [u8; 4] {
         self.tag.to_le_bytes()
-    }
-
-    /// Return the byte range of this section inside the file.
-    #[inline]
-    pub fn byte_range(&self, elem_size: usize) -> std::ops::Range<usize> {
-        let start = self.offset as usize;
-        let end   = start + self.repetitions as usize * elem_size;
-        start..end
     }
 }

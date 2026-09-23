@@ -205,7 +205,7 @@ pub fn real_json(curve: &[(f32, f32)]) -> String {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!("[{},{}]", super::num(t), super::num(v)));
+        out.push_str(&format!("[{},{}]", crate::json::num(t), crate::json::num(v)));
     }
     out.push(']');
     out
@@ -221,10 +221,10 @@ pub fn vec3_json(curve: &[(f32, [f32; 3])]) -> String {
         }
         out.push_str(&format!(
             "[{},[{},{},{}]]",
-            super::num(t),
-            super::num(v[0]),
-            super::num(v[1]),
-            super::num(v[2])
+            crate::json::num(t),
+            crate::json::num(v[0]),
+            crate::json::num(v[1]),
+            crate::json::num(v[2])
         ));
     }
     out.push(']');
