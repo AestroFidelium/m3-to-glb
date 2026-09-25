@@ -138,6 +138,9 @@ every output is a valid glTF. Run it all with `cargo test`, or fuzz with
   itself converts normally.
 - Geometry that the game shows only during certain animations is left out, as
   it is in the idle pose.
+- Newer Heroes of the Storm materials (`MADD`) are shader node graphs; only
+  their textures and blend mode are read. Glass whose opacity comes from the
+  shader rather than a texture, such as Tracer's goggles, renders opaque.
 - Not exported: animated UVs and material colours, ribbons, physics shapes,
   cameras. Composite materials use their first layer.
 

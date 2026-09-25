@@ -262,27 +262,11 @@ impl<'data> M3File<'data> {
     ///
     /// The texture list reference is out of range.
     pub fn madd_texture_paths(&self, madd_idx: usize) -> Result<Vec<String>> {
-        let Some(tag_idx) = self.find_tag(b"DDAM") else { return Ok(Vec::new()); };
-        let entry = &self.tags[tag_idx];
-        let version = entry.version;
-
-        // texture_paths offset inside MADD per version:
-        //   v1 (140B): name(12)+unk2(12)+unk4(12)            → +36
-        //   v2 (152B): name(12)+unk2(12)+unk3(12)+unk4(12)   → +48
-        //   v3 (160B): same as v2                            → +48
-        let (file_elem_sz, tex_paths_off) = match version {
-            1 => (140usize, 36usize),
-            2 => (152, 48),
-            _ => (160, 48), // v3 and unknown versions default to v3 layout
-        };
-
-        if madd_idx >= entry.repetitions as usize { return Ok(Vec::new()); }
-
-        let base = entry.offset as usize + madd_idx * file_elem_sz;
-        let Some(texture_paths_ref) = self.pod_at::<Reference>(base + tex_paths_off) else {
+        let Some(tex_paths_at) = self.madd_texture_paths_offset(madd_idx) else { return Ok(Vec::new()); };
+        let Some(texture_paths_ref) = self.pod_at::<Reference>(tex_paths_at) else {
             return Ok(Vec::new());
         };
-        debug!("MADD[{}] v{} texture_paths: {:?}", madd_idx, version, texture_paths_ref);
+        debug!("MADD[{}] texture_paths: {:?}", madd_idx, texture_paths_ref);
         if texture_paths_ref.entries == 0 { return Ok(Vec::new()); }
         let schrs: Vec<Schr> = self.read_ref_slice::<Schr>(&texture_paths_ref)?;
 
@@ -292,6 +276,40 @@ impl<'data> M3File<'data> {
             out.push(s);
         }
         Ok(out)
+    }
+
+    /// Blend mode of the MADD at `madd_idx`: the same enum as `MAT_.blend_mode`
+    /// (0 opaque, 1 alpha blend, 2 add, 3 alpha add, 4 mod, 5 mod 2x).
+    ///
+    /// `structures.xml` calls it `unknown_16`. Identified across the 2,583 MADD
+    /// records shipped with Heroes of the Storm: it only ever holds 0–7, and
+    /// the names agree — `*_Transparency`, `*Glass*` and `*_Alpha` are 1,
+    /// `additive*` 3, `Flare` / `Glow` 2 or 3, hero body materials 0.
+    #[must_use]
+    pub fn madd_blend_mode(&self, madd_idx: usize) -> u32 {
+        // texture_paths(12) + unknown_00..=unknown_15 (16 × 4)
+        self.madd_texture_paths_offset(madd_idx)
+            .and_then(|at| self.pod_at::<u32>(at + 12 + 64))
+            .unwrap_or(0)
+    }
+
+    /// Absolute offset of `texture_paths` in the MADD record at `madd_idx`,
+    /// the field every other MADD field is located from.
+    fn madd_texture_paths_offset(&self, madd_idx: usize) -> Option<usize> {
+        let entry = &self.tags[self.find_tag(b"DDAM")?];
+        if madd_idx >= entry.repetitions as usize {
+            return None;
+        }
+        // texture_paths offset inside MADD per version:
+        //   v1 (140B): name(12)+unk2(12)+unk4(12)            → +36
+        //   v2 (152B): name(12)+unk2(12)+unk3(12)+unk4(12)   → +48
+        //   v3 (160B): same as v2                            → +48
+        let (file_elem_sz, tex_paths_off) = match entry.version {
+            1 => (140usize, 36usize),
+            2 => (152, 48),
+            _ => (160, 48), // v3 and unknown versions default to v3 layout
+        };
+        Some(entry.offset as usize + madd_idx * file_elem_sz + tex_paths_off)
     }
 
     /// Number of bones in the `BONE` tag.

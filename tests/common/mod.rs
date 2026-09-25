@@ -235,6 +235,8 @@ pub struct ModelSpec {
     pub materials:    Vec<MatSpec>,
     pub madd_version: u32,
     pub madds:        Vec<Vec<String>>,
+    /// `blend_mode` of each MADD, index-aligned with `madds`; missing = 0.
+    pub madd_blends:  Vec<u32>,
     pub matms:        Vec<(u32, u32)>,
     pub composites:   Vec<Vec<u32>>,
     pub seqs_version: u32,
@@ -272,6 +274,7 @@ impl Default for ModelSpec {
             materials:      Vec::new(),
             madd_version:   3,
             madds:          Vec::new(),
+            madd_blends:    Vec::new(),
             matms:          Vec::new(),
             composites:     Vec::new(),
             seqs_version:   2,
@@ -438,7 +441,8 @@ impl ModelSpec {
         let madds: Vec<Vec<u8>> = self
             .madds
             .iter()
-            .map(|paths| {
+            .enumerate()
+            .map(|(i, paths)| {
                 let schrs: Vec<Schr> = paths.iter().map(|p| Schr { path: w.chars(p) }).collect();
                 let r = w.pods("SCHR", 0, &schrs);
                 let (size, at) = match self.madd_version {
@@ -448,6 +452,8 @@ impl ModelSpec {
                 };
                 let mut rec = vec![0u8; size];
                 rec[at..at + 12].copy_from_slice(bytemuck::bytes_of(&r));
+                let blend = self.madd_blends.get(i).copied().unwrap_or(0);
+                rec[at + 76..at + 80].copy_from_slice(&blend.to_le_bytes());
                 rec
             })
             .collect();
@@ -719,6 +725,7 @@ pub fn with_effects() -> ModelSpec {
         MatSpec { blend: 2, layers: vec![("emis1", LayerSpec { color: Some([0, 0, 255, 255]), ..LayerSpec::default() })], ..MatSpec::default() },
     ];
     spec.madds = vec![vec!["fx_diff.dds".into()]];
+    spec.madd_blends = vec![1];
     spec.matms = vec![(1, 0), (3, 0), (12, 0), (5, 0)];
     spec.composites = vec![vec![2]];
     spec.stcs = vec![StcSpec {

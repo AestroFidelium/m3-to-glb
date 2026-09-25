@@ -117,11 +117,13 @@ fn madd_paths_out_of_range_or_truncated() {
     let m3 = parse(&bytes).unwrap();
     assert_eq!(m3.madd_texture_paths(0).unwrap(), ["a_diff.dds"]);
     assert!(m3.madd_texture_paths(5).unwrap().is_empty());
+    assert_eq!(m3.madd_blend_mode(5), 0);
 
     let mut w = M3Writer::new(*b"43DM");
     w.raw("MADD", 3, vec![0; 8], 1); // record cut short
     let bytes = w.finish();
     assert!(parse(&bytes).unwrap().madd_texture_paths(0).unwrap().is_empty());
+    assert_eq!(parse(&bytes).unwrap().madd_blend_mode(0), 0);
 }
 
 #[test]

@@ -288,6 +288,22 @@ fn madd_materials_route_textures_by_suffix() {
 }
 
 #[test]
+fn madd_blend_mode_makes_the_material_transparent() {
+    for v in [1, 2, 3] {
+        for (blend, alpha_mode) in [(0, None), (1, Some("BLEND")), (3, Some("BLEND"))] {
+            let mut spec = ModelSpec::quad();
+            spec.materials.clear();
+            spec.madd_version = v;
+            spec.madds = vec![vec!["a_diff.dds".into()]];
+            spec.madd_blends = vec![blend];
+            spec.matms = vec![(12, 0)];
+            let m = material(&spec);
+            assert_eq!(m["alphaMode"].as_str(), alpha_mode, "MADD v{v} blend {blend}");
+        }
+    }
+}
+
+#[test]
 fn composite_materials_fall_back_to_their_first_section() {
     let mut spec = ModelSpec::quad();
     spec.matms = vec![(3, 0), (1, 0)];

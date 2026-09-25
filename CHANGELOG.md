@@ -5,6 +5,13 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `MADD` materials (newer Heroes of the Storm models) now carry their blend
+  mode: alpha-blended and additive ones export as `alphaMode: BLEND` instead of
+  opaque, and effects that use them report the real blend in `extras`. The
+  field (`unknown_16` in `structures.xml`) holds the same enum as
+  `MAT_.blend_mode`, identified across all 2,583 `MADD` records in the game.
+
 ### Changed
 - Dependencies updated, including `multiversion` 0.9 (SIMD dispatch) and
   `anstream` 1.0; output is byte-identical.

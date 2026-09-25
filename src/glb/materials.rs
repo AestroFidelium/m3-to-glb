@@ -140,6 +140,9 @@ impl<'a, 'm> Materials<'a, 'm> {
             }
         }
         let [diff, norm, emis, ao] = slots;
+        // Same enum as `MAT_`; MADD has no alpha-test threshold we know of.
+        let blend_mode = self.m3.madd_blend_mode(mat_idx);
+        debug!("MADD[{}] blend_mode={}", mat_idx, blend_mode);
         GltfMaterial {
             name: format!("madd_{mat_idx}"),
             base_color_texture: diff,
@@ -150,7 +153,7 @@ impl<'a, 'm> Materials<'a, 'm> {
             metallic_factor: 0.0,
             roughness_factor: 1.0,
             emissive_factor: if emis.is_some() { [1.0; 3] } else { [0.0; 3] },
-            alpha_mode: None,
+            alpha_mode: (blend_mode != 0).then_some("BLEND"),
             alpha_cutoff: 0.5,
             double_sided: false,
         }
@@ -208,7 +211,7 @@ impl<'a, 'm> Materials<'a, 'm> {
                 if let Some(diff) = paths.iter().find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Diff)) {
                     resolve.texture = images.load(bufs, diff, TextureRole::Color);
                 }
-                resolve.blend = "blend";
+                resolve.blend = blend_name(m3.madd_blend_mode(mat_idx));
             }
             t => debug!("effect material type {} — unsupported", t),
         }
