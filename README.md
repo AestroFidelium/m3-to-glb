@@ -28,7 +28,7 @@ $ m3-to-glb Ultralisk.m3 -t textures/
     <td align="center">Ultralisk — StarCraft II</td>
   </tr>
   <tr>
-    <td colspan="3" align="center"><img src="docs/images/altar.png" width="600" alt="The Dragon Shire altar, a Heroes of the Storm map prop"><br>Dragon Shrine altar — a map prop</td>
+    <td colspan="3" align="center"><img src="docs/images/altar.png" width="600" alt="The Dragon Shire altar, a Heroes of the Storm map prop"><br>Dragon Shire altar — a map prop</td>
   </tr>
 </table>
 
