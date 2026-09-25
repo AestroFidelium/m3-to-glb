@@ -13,10 +13,26 @@ model's particle effects all come across.
 
 ```console
 $ m3-to-glb Ultralisk.m3 -t textures/
-✓ Ultralisk.m3 → Ultralisk.glb (1 mesh, 60 bones, 30 animations, 3 textures)
+✓ Ultralisk.m3 → Ultralisk.glb (1 mesh, 72 bones, 23 animations, 3 textures)
 ```
 
-<!-- TODO: docs/demo.gif — a converted hero playing its walk cycle in a glTF viewer -->
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/tracer.png" height="300" alt="Tracer, a Heroes of the Storm hero, converted to glTF"></td>
+    <td align="center"><img src="docs/images/ultralisk-hots.png" height="300" alt="The Heroes of the Storm Ultralisk"></td>
+    <td align="center"><img src="docs/images/ultralisk-sc2.png" height="300" alt="The StarCraft II Ultralisk"></td>
+  </tr>
+  <tr>
+    <td align="center">Tracer — Heroes of the Storm</td>
+    <td align="center">Ultralisk — Heroes of the Storm</td>
+    <td align="center">Ultralisk — StarCraft II</td>
+  </tr>
+  <tr>
+    <td colspan="3" align="center"><img src="docs/images/altar.png" width="600" alt="The Dragon Shrine altar, a Heroes of the Storm map prop"><br>Dragon Shrine altar — a map prop</td>
+  </tr>
+</table>
+
+<sub>Converted `.glb` files in the <a href="https://gltf-viewer.donmccurdy.com/">three.js glTF viewer</a>, with every animation clip available to play.</sub>
 
 ## What comes across
 
@@ -117,6 +133,9 @@ every output is a valid glTF. Run it all with `cargo test`, or fuzz with
 - DDS and TGA textures are embedded as they are. Bevy and three.js read them,
   but strict validators accept only PNG and JPEG — use `--ktx2`, or convert the
   texture folder first.
+- Effects in the oldest StarCraft II files (`PAR_` before v22, `PROJ` before
+  v5 — mostly Wings of Liberty assets) are skipped with a warning; the model
+  itself converts normally.
 - Geometry that the game shows only during certain animations is left out, as
   it is in the idle pose.
 - Not exported: animated UVs and material colours, ribbons, physics shapes,
