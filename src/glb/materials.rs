@@ -21,6 +21,8 @@ pub(super) struct Materials<'a, 'm> {
     matms:      Vec<Matm>,
     mat_count:  usize,
     madd_count: usize,
+    /// Every sequence's animated tracks — where a layer's scroll is read from.
+    curves:     crate::fx::curves::FxCurves,
 }
 
 /// The glTF materials that were emitted and how MATM indices map onto them.
@@ -42,7 +44,8 @@ impl<'a, 'm> Materials<'a, 'm> {
         let matms = m3.material_references().unwrap_or_default();
         let (mat_count, madd_count) = (m3.material_count(), m3.madd_count());
         debug!("M3 materials: MAT_={}, MADD={}, MATM={}", mat_count, madd_count, matms.len());
-        Self { m3, matms, mat_count, madd_count }
+        let curves = crate::fx::curves::FxCurves::build(m3);
+        Self { m3, matms, mat_count, madd_count, curves }
     }
 
     /// Emit a glTF material for every MATM entry some region actually uses —
@@ -97,19 +100,33 @@ impl<'a, 'm> Materials<'a, 'm> {
 
         // Flat-colour layers (LAYR colour bit, no bitmap): m3studio renders
         // these — e.g. an additive energy glow whose colour is in `color_value`.
+        //
+        // Either way the layer's own output scale applies: an emissive layer an
+        // animation switches on (a shrine's glow, a statue that wakes) is authored
+        // with its multiplier at zero, and drawn at rest it must not glow.
+        let emis_scale = self.layer_scale(mat_idx, "emis1");
         let emissive_factor = if emissive_texture.is_some() {
-            [1.0; 3]
+            [emis_scale; 3]
         } else {
-            m3.layer_color(mat_idx, "emis1").map_or([0.0; 3], |c| [c[0], c[1], c[2]])
+            m3.layer_color(mat_idx, "emis1").map_or([0.0; 3], |c| [c[0] * emis_scale, c[1] * emis_scale, c[2] * emis_scale])
         };
         // A diffuse bitmap modulates white; a diffuse colour layer supplies the
         // colour; a material with neither has no albedo source — black, not
         // glTF's white, or textureless effect geometry renders as white panels.
-        let base_color_factor = if base_color_texture.is_some() || !diff_path.is_empty() {
+        let mut base_color_factor = if base_color_texture.is_some() || !diff_path.is_empty() {
             [1.0; 4]
         } else {
             m3.layer_color(mat_idx, "diff").unwrap_or([0.0, 0.0, 0.0, 1.0])
         };
+        // A see-through layer's output scale is how much of it shows: an additive
+        // sheet authored at zero (a glow that only plays in some animation) adds
+        // nothing at rest, and a blended one fades with it.
+        let diff_scale = self.layer_scale(mat_idx, "diff");
+        match blend_mode {
+            2 | 3 => base_color_factor = base_color_factor.map(|c| c * diff_scale),
+            1 => base_color_factor[3] *= diff_scale,
+            _ => {}
+        }
 
         GltfMaterial {
             name: format!("material_{mat_idx}"),
@@ -124,7 +141,63 @@ impl<'a, 'm> Materials<'a, 'm> {
             alpha_mode,
             alpha_cutoff,
             double_sided: flags & 0x8 != 0,
+            m3_extras: self.m3_extras(blend_mode, Some(mat_idx)),
         }
+    }
+
+    /// `color_multiply × color_brightness` of a layer at rest — how much of it is
+    /// drawn. A slot with no record reads as fully on.
+    fn layer_scale(&self, mat_idx: usize, layer: &str) -> f32 {
+        use crate::m3::reader::LayerFloat;
+        let get = |f| self.m3.layer_float(mat_idx, layer, f).map_or(1.0, |(v, _)| v);
+        get(LayerFloat::Multiply) * get(LayerFloat::Brightness)
+    }
+
+    /// How fast a layer's texture scrolls, in UV per second: the slope of its
+    /// `uv_offset` track over the idle sequence (any sequence that animates it,
+    /// failing that). `None` for a still layer.
+    fn uv_scroll(&self, mat_idx: usize, layer: &str) -> Option<[f32; 2]> {
+        let (_, id) = self.m3.layer_uv_offset(mat_idx, layer)?;
+        let tracks = self.curves.vec2(id);
+        let (_, keys) = tracks
+            .iter()
+            .find(|(name, _)| name.to_ascii_lowercase().starts_with("stand"))
+            .or_else(|| tracks.first())?;
+        let (first, last) = (keys.first()?, keys.last()?);
+        let span = last.0 - first.0;
+        if span <= 1e-6 {
+            return None;
+        }
+        let rate = [(last.1[0] - first.1[0]) / span, (last.1[1] - first.1[1]) / span];
+        (rate.iter().any(|r| r.abs() > 1e-6) && rate.iter().all(|r| r.is_finite())).then_some(rate)
+    }
+
+    /// The `m3` extras object for what glTF cannot say: a blend other than
+    /// ordinary alpha, and (for `MAT_`) a scrolling diffuse or emissive layer.
+    fn m3_extras(&self, blend_mode: u32, mat_idx: Option<usize>) -> Option<String> {
+        let blend = match blend_mode {
+            2 => Some("add"),
+            3 => Some("alpha_add"),
+            4 | 5 => Some("multiply"),
+            _ => None,
+        };
+        // glTF has one texture transform per material, so the first layer that
+        // moves speaks for it — the colour's own, else the glow's, else a mask's
+        // (flowing water is often a still colour under a drifting alpha).
+        let scroll = mat_idx.and_then(|i| {
+            ["diff", "emis1", "alpha1", "alpha2", "spec", "emis2"].iter().find_map(|l| self.uv_scroll(i, l))
+        });
+        if blend.is_none() && scroll.is_none() {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if let Some(b) = blend {
+            parts.push(format!(r#""blend":{}"#, crate::json::string(b)));
+        }
+        if let Some([u, v]) = scroll {
+            parts.push(format!(r#""uv_scroll":[{},{}]"#, crate::json::num(u), crate::json::num(v)));
+        }
+        Some(format!("{{{}}}", parts.join(",")))
     }
 
     /// A `MADD` material: an unlabelled texture list, routed by file suffix.
@@ -156,6 +229,7 @@ impl<'a, 'm> Materials<'a, 'm> {
             alpha_mode: (blend_mode != 0).then_some("BLEND"),
             alpha_cutoff: 0.5,
             double_sided: false,
+            m3_extras: self.m3_extras(blend_mode, None),
         }
     }
 
@@ -198,8 +272,13 @@ impl<'a, 'm> Materials<'a, 'm> {
         let mut resolve = fx::MaterialResolve::default();
         match matm.mat_type {
             MAT_STANDARD if mat_idx < self.mat_count => {
-                let diff = m3.texture_path_for_layer(mat_idx, "diff");
-                resolve.texture = images.load(bufs, &diff, TextureRole::Color);
+                // The diffuse bitmap, else the one an emissive or mask layer carries:
+                // fire and glow are often a flat colour drawn through a glow or
+                // alpha sprite, and without it every particle is a solid square.
+                resolve.texture = ["diff", "emis1", "alpha1", "emis2"].iter().find_map(|l| {
+                    let path = m3.texture_path_for_layer(mat_idx, l);
+                    (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten()
+                });
                 // A textureless effect material carries its colour in the layer.
                 if resolve.texture.is_none() {
                     resolve.color = m3.layer_color(mat_idx, "diff").or_else(|| m3.layer_color(mat_idx, "emis1"));
@@ -311,6 +390,7 @@ mod tests {
             alpha_mode:         None,
             alpha_cutoff:       0.5,
             double_sided:       false,
+            m3_extras:          None,
         }
     }
 

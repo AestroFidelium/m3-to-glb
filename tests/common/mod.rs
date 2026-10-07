@@ -17,6 +17,7 @@ use bytemuck::{Pod, Zeroable};
 use m3_to_glb::m3::structures::{
     Atvl, Bat, Bone, Cms, Div, Lite, Matm, Par, Proj, Reference, Regn, Schr, Seqs, SeqsV1, Stc, Stg,
 };
+use m3_to_glb::m3::reader::{LayerFloat, layr_uv_offset_offset};
 use m3_to_glb::m3::{layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags};
 use m3_to_glb::m3::reader::M3File;
 use m3_to_glb::processor::VertexOffsets;
@@ -177,6 +178,13 @@ pub struct LayerSpec {
     /// Flat colour, stored `[b, g, r, a]`; sets the colour-layer flag.
     pub color:     Option<[u8; 4]>,
     pub uv_tiling: [f32; 2],
+    /// `color_multiply` as `(default, animation id)`; `None` writes `(1.0, 0)`,
+    /// what real files carry for a layer drawn as authored.
+    pub multiply:  Option<(f32, u32)>,
+    /// `color_brightness`, likewise.
+    pub brightness: Option<(f32, u32)>,
+    /// `uv_offset` as `(default, animation id)`; `None` writes `([0, 0], 0)`.
+    pub uv_offset: Option<([f32; 2], u32)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -193,6 +201,7 @@ pub enum Track {
     Vec3(Vec<(i32, [f32; 3])>),
     Quat(Vec<(i32, [f32; 4])>),
     Real(Vec<(i32, f32)>),
+    Vec2(Vec<(i32, [f32; 2])>),
     I16(Vec<(i32, i16)>),
     U16(Vec<(i32, u16)>),
 }
@@ -574,6 +583,17 @@ impl ModelSpec {
             }
             let t = layr_uv_tiling_offset(self.layr_version) + 8;
             l[t..t + 8].copy_from_slice(bytemuck::bytes_of(&layer.uv_tiling));
+            let mut float = |field: LayerFloat, (default, id): (f32, u32)| {
+                let f = field.offset(self.layr_version);
+                l[f + 4..f + 8].copy_from_slice(&id.to_le_bytes());
+                l[f + 8..f + 12].copy_from_slice(&default.to_le_bytes());
+            };
+            float(LayerFloat::Multiply, layer.multiply.unwrap_or((1.0, 0)));
+            float(LayerFloat::Brightness, layer.brightness.unwrap_or((1.0, 0)));
+            let (offset, id) = layer.uv_offset.unwrap_or(([0.0; 2], 0));
+            let uv = layr_uv_offset_offset(self.layr_version);
+            l[uv + 4..uv + 8].copy_from_slice(&id.to_le_bytes());
+            l[uv + 8..uv + 16].copy_from_slice(bytemuck::bytes_of(&offset));
             let r = w.records("LAYR", self.layr_version, &[l]);
             rec[at..at + 12].copy_from_slice(bytemuck::bytes_of(&r));
         }
@@ -598,6 +618,7 @@ fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
     let mut ids = Vec::new();
     let mut refs = Vec::new();
     let (mut vec3s, mut quats, mut reals, mut i16s, mut u16s) = (vec![], vec![], vec![], vec![], vec![]);
+    let mut vec2s = vec![];
     for (id, track) in &spec.tracks {
         let (kind, blocks, block) = match track {
             Track::Vec3(k) => (2u32, &mut vec3s, sd_block(w, "VEC3", k)),
@@ -609,6 +630,7 @@ fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
                 (3, &mut quats, sd_block(w, "QUAT", &k))
             }
             Track::Real(k) => (5, &mut reals, sd_block(w, "REAL", k)),
+            Track::Vec2(k) => (1, &mut vec2s, sd_block(w, "VEC2", k)),
             Track::I16(k) => (7, &mut i16s, sd_block(w, "I16_", k)),
             Track::U16(k) => (8, &mut u16s, sd_block(w, "U16_", k)),
         };
@@ -624,6 +646,7 @@ fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
     }
     out.anim_ids = w.pods("U32_", 0, &ids);
     out.anim_refs = w.pods("U32_", 0, &refs);
+    out.sd2v = w.pods("SD2V", 0, &vec2s);
     out.sd3v = w.pods("SD3V", 0, &vec3s);
     out.sd4q = w.pods("SD4Q", 0, &quats);
     out.sdr3 = w.pods("SDR3", 0, &reals);

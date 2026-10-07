@@ -25,6 +25,7 @@ use crate::m3::structures::Reference;
 pub type Track<'a, T> = Vec<(&'a str, &'a [(f32, T)])>;
 
 /// `anim_type` values inside a packed `anim_ref`, per m3studio.
+const ANIM_TYPE_VEC2: u32 = 1;
 const ANIM_TYPE_VEC3: u32 = 2;
 const ANIM_TYPE_REAL: u32 = 5;
 const ANIM_TYPE_INT16: u32 = 7;
@@ -51,6 +52,8 @@ struct SeqCurves {
     real: Vec<Vec<(f32, f32)>>,
     /// Vec3 tracks, already decoded.
     vec3: Vec<Vec<(f32, [f32; 3])>>,
+    /// Vec2 tracks, already decoded — a material layer's `uv_offset`.
+    vec2: Vec<Vec<(f32, [f32; 2])>>,
     /// 16-bit integer tracks, widened to float. A burst emitter's particle
     /// count lives here rather than in a float track.
     int16: Vec<Vec<(f32, f32)>>,
@@ -92,6 +95,13 @@ impl FxCurves {
                 .map(|b| decode_vec3(m3, &b.frames, &b.keys))
                 .collect();
 
+            let vec2 = m3
+                .read_sd2v(&stc.sd2v)
+                .unwrap_or_default()
+                .iter()
+                .map(|b| decode_vec2(m3, &b.frames, &b.keys))
+                .collect();
+
             let int16 = m3
                 .read_sds6(&stc.sds6)
                 .unwrap_or_default()
@@ -105,7 +115,7 @@ impl FxCurves {
                 .map(|b| decode_int(m3, &b.frames, &b.keys, true))
                 .collect();
 
-            seqs.push(SeqCurves { name, lookup, real, vec3, int16, uint16 });
+            seqs.push(SeqCurves { name, lookup, real, vec3, vec2, int16, uint16 });
         }
         Self { seqs }
     }
@@ -154,7 +164,25 @@ impl FxCurves {
             .collect()
     }
 
-    /// The vec3 curve for `anim_id` in each sequence that drives it.
+    /// Every sequence's keys for a VEC2 track (a layer's `uv_offset`, …).
+    #[must_use]
+    pub fn vec2(&self, anim_id: u32) -> Track<'_, [f32; 2]> {
+        if anim_id == 0 {
+            return Vec::new();
+        }
+        self.seqs
+            .iter()
+            .filter_map(|s| match s.lookup.get(&anim_id) {
+                Some(&(ANIM_TYPE_VEC2, idx)) => {
+                    let c = s.vec2.get(idx as usize)?;
+                    (!c.is_empty()).then_some((s.name.as_str(), c.as_slice()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every sequence's keys for a VEC3 track.
     #[must_use]
     pub fn vec3(&self, anim_id: u32) -> Track<'_, [f32; 3]> {
         if anim_id == 0 {
@@ -276,6 +304,13 @@ fn decode_int(m3: &M3File<'_>, frames: &Reference, keys: &Reference, unsigned: b
         m3.read_ref_i16(keys).unwrap_or_default().into_iter().map(f32::from).collect()
     };
     f.iter().zip(v.iter()).map(|(&ms, &val)| (ms as f32 / 1000.0, val)).collect()
+}
+
+fn decode_vec2(m3: &M3File<'_>, frames: &Reference, keys: &Reference) -> Vec<(f32, [f32; 2])> {
+    let f = m3.read_ref_i32(frames).unwrap_or_default();
+    let v = m3.read_ref_vec2(keys).unwrap_or_default();
+    let fin = |x: f32| if x.is_finite() { x } else { 0.0 };
+    f.iter().zip(v.iter()).map(|(&ms, p)| (ms as f32 / 1000.0, [fin(p.x), fin(p.y)])).collect()
 }
 
 fn decode_vec3(m3: &M3File<'_>, frames: &Reference, keys: &Reference) -> Vec<(f32, [f32; 3])> {

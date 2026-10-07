@@ -266,6 +266,82 @@ fn colour_layers_become_factors() {
     assert_eq!(f(&m["emissiveFactor"][1]), 1.0);
 }
 
+/// The `m3` block a converted material carries in its `extras`, if any.
+fn m3_extras(m: &Value) -> Value {
+    m.pointer("/extras/m3").cloned().unwrap_or(Value::Null)
+}
+
+#[test]
+fn an_emissive_layer_scales_by_its_multiplier_and_brightness() {
+    // Off by default — a glow an animation switches on — must not glow at rest.
+    for ((multiply, brightness), want) in [((0.0, 1.0), 0.0), ((2.0, 0.5), 1.0), ((1.0, 1.0), 1.0)] {
+        let mut spec = ModelSpec::quad();
+        spec.materials[0].layers = vec![
+            ("diff", LayerSpec { color: Some([255, 255, 255, 255]), ..LayerSpec::default() }),
+            (
+                "emis1",
+                LayerSpec {
+                    color: Some([0, 255, 0, 255]),
+                    multiply: Some((multiply, 7)),
+                    brightness: Some((brightness, 8)),
+                    ..LayerSpec::default()
+                },
+            ),
+        ];
+        let m = material(&spec);
+        let got = m.get("emissiveFactor").map_or(0.0, |e| f(&e[1]));
+        assert!((got - want).abs() < 1e-6, "multiply {multiply} brightness {brightness}: {got}");
+    }
+}
+
+#[test]
+fn additive_and_modulating_blends_are_named_in_extras() {
+    for (blend, name) in [(1, None), (2, Some("add")), (3, Some("alpha_add")), (4, Some("multiply")), (5, Some("multiply"))] {
+        let mut spec = ModelSpec::quad();
+        spec.materials[0].blend = blend;
+        let m = material(&spec);
+        assert_eq!(m["alphaMode"], "BLEND", "blend {blend}");
+        assert_eq!(m3_extras(&m).get("blend").and_then(Value::as_str), name, "blend {blend}");
+    }
+}
+
+#[test]
+fn an_additive_layer_switched_off_by_default_draws_nothing() {
+    let mut spec = ModelSpec::quad();
+    spec.materials[0].blend = 3;
+    spec.materials[0].layers =
+        vec![("diff", LayerSpec { color: Some([255, 255, 255, 255]), multiply: Some((0.0, 5)), ..LayerSpec::default() })];
+    let base = material(&spec)["pbrMetallicRoughness"]["baseColorFactor"].clone();
+    assert!((0..4).all(|i| f(&base[i]) == 0.0), "an off additive layer must add nothing: {base}");
+}
+
+#[test]
+fn an_animated_uv_offset_becomes_a_scroll_rate() {
+    let mut spec = ModelSpec::quad();
+    spec.materials[0].layers[0].1.uv_offset = Some(([0.0, 0.25], 99));
+    spec.stcs = vec![StcSpec {
+        name: "Stand_full".into(),
+        tracks: vec![(99, Track::Vec2(vec![(0, [0.0, 0.25]), (2000, [1.0, -3.75])]))],
+        ..StcSpec::default()
+    }];
+    spec.sequences = vec![SeqSpec { name: "Stand".into(), stcs: vec![0] }];
+    let scroll = m3_extras(&material(&spec))["uv_scroll"].clone();
+    assert!((f(&scroll[0]) - 0.5).abs() < 1e-5 && (f(&scroll[1]) + 2.0).abs() < 1e-5, "{scroll}");
+
+    // A layer that only drifts its mask (flowing water drawn as a still colour
+    // under a moving alpha) scrolls the material just the same.
+    let mut masked = spec.clone();
+    masked.materials[0].layers[0].1.uv_offset = None;
+    masked.materials[0].layers.push(("alpha1", LayerSpec { uv_offset: Some(([0.0; 2], 99)), ..LayerSpec::default() }));
+    let scroll = m3_extras(&material(&masked))["uv_scroll"].clone();
+    assert!((f(&scroll[0]) - 0.5).abs() < 1e-5, "alpha-layer scroll: {scroll}");
+
+    // A still offset scrolls nowhere: no extras.
+    spec.stcs.clear();
+    spec.sequences.clear();
+    assert!(m3_extras(&material(&spec)).get("uv_scroll").is_none());
+}
+
 #[test]
 fn a_material_with_no_albedo_source_is_black() {
     let mut spec = ModelSpec::quad();
@@ -766,4 +842,21 @@ fn effect_textures_are_embedded_and_referenced() {
     assert_eq!(fx[0]["texture"], "#Texture0");
     assert_eq!(fx[2]["texture"], "#Texture1", "the MADD diffuse behind the composite");
     assert_eq!(g.count("images"), 2);
+}
+
+#[test]
+fn an_effect_with_no_diffuse_bitmap_samples_its_glow_or_mask() {
+    // Fire and glow emitters often draw a flat colour through an emissive or alpha
+    // layer's bitmap; without it every particle is a solid square.
+    for slot in ["emis1", "alpha1"] {
+        let dir = texture_dir(&["flame_emis.png"]);
+        let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+        let mut spec = with_effects();
+        spec.materials[0].layers = vec![
+            ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
+            (slot, LayerSpec { texture: "flame_emis.dds".into(), ..LayerSpec::default() }),
+        ];
+        let g = convert_with(&spec, &Converter::new().textures(&cache));
+        assert_eq!(g.extras("m3fx")[0]["texture"], "#Texture0", "{slot}");
+    }
 }

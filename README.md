@@ -40,6 +40,8 @@ $ m3-to-glb Ultralisk.m3 -t textures/
   file uses.
 - **Materials** — diffuse, normal, emissive and ambient-occlusion textures,
   alpha blending and alpha testing, two-sided surfaces, flat-colour layers.
+  Additive and multiplicative blends and scrolling textures, which glTF has no
+  field for, ride in the material's `extras` ([format](docs/material-extras.md)).
   Textures are looked up by name in a folder you point at and embedded.
 - **Skeleton and animations** — bones, skinning, and every clip from the model
   and its companion `.m3a` files.
@@ -141,8 +143,9 @@ every output is a valid glTF. Run it all with `cargo test`, or fuzz with
 - Newer Heroes of the Storm materials (`MADD`) are shader node graphs; only
   their textures and blend mode are read. Glass whose opacity comes from the
   shader rather than a texture, such as Tracer's goggles, renders opaque.
-- Not exported: animated UVs and material colours, ribbons, physics shapes,
-  cameras. Composite materials use their first layer.
+- Animated UVs are reduced to a constant scroll rate; other animated material
+  values (colours, brightness) are taken at rest. Not exported: ribbons,
+  physics shapes, cameras. Composite materials use their first layer.
 
 ## Credits
 
