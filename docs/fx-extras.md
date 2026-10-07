@@ -158,6 +158,8 @@ only `kind`, `capacity`, `spawn`, `lifetime`, `speed`, `emit_type`, `shape`,
 | `tail` | Present for the stretched orientations. `mode` is `free` · `clamp` · `fix` |
 | `flipbook` | Sprite-sheet atlas. The frame starts somewhere in `start` and walks to somewhere in `end` over `lifespan_factor` of the life |
 | `blend` | `opaque` · `blend` · `add` · `multiply` |
+| `emissive` | The material's glow bitmap, `"#TextureN"`, when it is a different image from `texture` — drawn over the particle with `emissive_blend` |
+| `emissive_blend` | `add` · `blend` · `multiply` — present with `emissive` |
 | `space` | `local` (particles ride the emitter) or `world` (detached once spawned) |
 | `model_particles` | The emitter draws a **mesh** per particle. The glTF carries no such mesh — skip the emitter rather than drawing quads |
 | `trail_of` | This emitter trails the particles of emitter *n* in the same file |

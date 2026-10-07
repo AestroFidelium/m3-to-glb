@@ -58,6 +58,11 @@ pub struct MaterialResolve {
     pub blend:   &'static str,
     /// Flat colour of a textureless (colour-layer) material, if any.
     pub color:   Option<[f32; 4]>,
+    /// The emissive layer's bitmap, when the material carries one distinct from
+    /// [`texture`](Self::texture): the glow drawn over the diffuse.
+    pub emissive: Option<usize>,
+    /// How that layer composites: `"add"`, `"blend"` or `"multiply"`.
+    pub emissive_blend: &'static str,
 }
 
 // ─── Collected effects ───────────────────────────────────────────────────────
@@ -592,6 +597,10 @@ fn material_json(j: &mut Obj, mat: &MaterialResolve) {
     }
     if !mat.blend.is_empty() {
         j.string("blend", mat.blend);
+    }
+    if let Some(e) = mat.emissive {
+        j.string("emissive", &format!("#Texture{e}"));
+        j.string("emissive_blend", mat.emissive_blend);
     }
 }
 

@@ -17,7 +17,7 @@ fn particle(par: &Par) -> serde_json::Value {
         matm_index: Some(0),
         kind:       FxKind::Particle(Box::new(*par)),
     };
-    let mat = MaterialResolve { texture: Some(3), blend: "add", color: None };
+    let mat = MaterialResolve { texture: Some(3), blend: "add", ..MaterialResolve::default() };
     let raw = item.extras_json(&mat, &FxCurves::default());
     serde_json::from_str::<serde_json::Value>(&raw)
         .unwrap_or_else(|e| panic!("not valid JSON: {e}\n{raw}"))
@@ -131,7 +131,7 @@ fn effect_names_survive_a_json_string() {
         matm_index: None,
         kind:       FxKind::Particle(Box::new(Par::zeroed())),
     };
-    let mat = MaterialResolve { texture: None, blend: "blend", color: Some([1.0, 0.0, 0.0, 1.0]) };
+    let mat = MaterialResolve { blend: "blend", color: Some([1.0, 0.0, 0.0, 1.0]), ..MaterialResolve::default() };
     let raw = item.extras_json(&mat, &FxCurves::default());
     serde_json::from_str::<serde_json::Value>(&raw).expect("quoted name JSON");
 }

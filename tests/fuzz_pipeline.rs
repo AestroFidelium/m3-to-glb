@@ -284,6 +284,8 @@ impl FuzzModel {
             .take(4)
             .map(|m| MatSpec {
                 blend:           u32::from(m.blend % 8),
+                // The high bits of the same draw: the emissive layer's blend.
+                emis_blend:      u32::from(m.blend >> 4),
                 flags:           u32::from(m.flags),
                 alpha_threshold: u32::from(m.alpha),
                 layers:          m

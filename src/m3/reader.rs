@@ -862,10 +862,34 @@ impl<'data> M3File<'data> {
         self.pod_at(entry.offset as usize + mat_idx * file_elem_sz + field_offset)
     }
 
-    /// `blend_mode` from MAT_ (+20). 0=Opaque,1=Blend,2=Erase,3=Add,4=AddAlpha,5=Mod,6=Mod2x.
+    /// `blend_mode` from MAT_ (+20): 0 opaque, 1 alpha blend, 2 add, 3 alpha add,
+    /// 4 mod, 5 mod 2x — verified against the shipped material records, and the
+    /// table [`crate::glb`]'s blend naming relies on.
     #[must_use]
     pub fn mat_blend_mode(&self, mat_idx: usize) -> u32 {
         self.mat_read_u32(mat_idx, 20).unwrap_or(0)
+    }
+
+    /// Where `blend_mode_emis1` sits in a `MAT_` record of `version`, or `None`
+    /// where it is not known. The trailing fields of a v19 record sit 12 bytes
+    /// before v20's (+276 against +288) — read off the shipped effect materials,
+    /// where every v19 record holds a small blend value there and +288 holds flags.
+    #[must_use]
+    pub const fn mat_emis1_blend_offset(version: u32) -> Option<usize> {
+        match version {
+            0..=18 => None,
+            19 => Some(276),
+            _ => Some(288),
+        }
+    }
+
+    /// `blend_mode_emis1` of `MAT_` record `mat_idx`: how the emissive layer
+    /// composites (0 mod, 1 mod 2x, 2 add, 3 blend, 4 and 5 team-colour adds), or
+    /// `None` for a version whose layout does not say.
+    #[must_use]
+    pub fn mat_emis1_blend_mode(&self, mat_idx: usize) -> Option<u32> {
+        let version = self.tags.get(self.find_tag(b"_TAM")?)?.version;
+        self.mat_read_u32(mat_idx, Self::mat_emis1_blend_offset(version)?)
     }
 
     /// `alpha_test_threshold` from MAT_ (+40). Stored as uint8 in the low byte of a u32.

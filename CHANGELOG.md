@@ -10,8 +10,14 @@ versions follow [SemVer](https://semver.org/).
   `alpha_add`, `multiply`) for `MAT_`/`MADD` blend modes other than plain alpha,
   and `uv_scroll` (UV per second) read from the slope of a layer's animated
   `uv_offset` over the idle sequence — the colour's, the glow's or a mask's.
+- Effects whose material carries a glow bitmap distinct from its diffuse write
+  it as `emissive` (`#TextureN`) with `emissive_blend`, read from
+  `MAT_.blend_mode_emis1` (or additive for `MADD` and older `MAT_` versions).
+  The additive glow was the bright half of most bursts and was dropped.
 
 ### Fixed
+- The doc comment on `mat_blend_mode` carried a different, wrong enum table
+  (with an `Erase` entry); it now states the verified one the export uses.
 - Emissive and see-through layers honour their `color_multiply` and
   `color_brightness`: a glow or additive sheet authored at zero (switched on by
   an animation) no longer draws at full strength at rest.

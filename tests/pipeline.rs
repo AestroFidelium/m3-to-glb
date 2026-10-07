@@ -845,6 +845,44 @@ fn effect_textures_are_embedded_and_referenced() {
 }
 
 #[test]
+fn an_effect_with_a_distinct_glow_carries_it_as_its_emissive_layer() {
+    // The additive glow beside a diffuse bitmap is most of what makes a burst read
+    // bright; it is written as its own texture with its own blend.
+    for (emis_blend, name) in [(2, "add"), (3, "blend"), (0, "multiply")] {
+        let dir = texture_dir(&["shard_diff.png", "shard_emis.png"]);
+        let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+        let mut spec = with_effects();
+        spec.materials[0].emis_blend = emis_blend;
+        spec.materials[0].layers = vec![
+            ("diff", LayerSpec { texture: "shard_diff.dds".into(), ..LayerSpec::default() }),
+            ("emis1", LayerSpec { texture: "shard_emis.dds".into(), ..LayerSpec::default() }),
+        ];
+        let g = convert_with(&spec, &Converter::new().textures(&cache));
+        let fx = &g.extras("m3fx")[0];
+        assert_eq!(fx["texture"], "#Texture0");
+        assert_eq!(fx["emissive"], "#Texture1", "{fx}");
+        assert_eq!(fx["emissive_blend"], name, "blend {emis_blend}");
+    }
+}
+
+#[test]
+fn a_glow_that_is_the_diffuse_or_the_only_bitmap_is_not_written_twice() {
+    for layers in [vec!["diff", "emis1"], vec!["emis1"]] {
+        let dir = texture_dir(&["flame_diff.png"]);
+        let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+        let mut spec = with_effects();
+        spec.materials[0].layers = layers
+            .iter()
+            .map(|l| (*l, LayerSpec { texture: "flame_diff.dds".into(), ..LayerSpec::default() }))
+            .collect();
+        let g = convert_with(&spec, &Converter::new().textures(&cache));
+        let fx = &g.extras("m3fx")[0];
+        assert_eq!(fx["texture"], "#Texture0", "{layers:?}");
+        assert!(fx.get("emissive").is_none(), "{layers:?}: {fx}");
+    }
+}
+
+#[test]
 fn an_effect_with_no_diffuse_bitmap_samples_its_glow_or_mask() {
     // Fire and glow emitters often draw a flat colour through an emissive or alpha
     // layer's bitmap; without it every particle is a solid square.
