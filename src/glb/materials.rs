@@ -279,6 +279,20 @@ impl<'a, 'm> Materials<'a, 'm> {
                     let path = m3.texture_path_for_layer(mat_idx, l);
                     (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten()
                 });
+                // The glow beside a diffuse bitmap is its own layer, drawn over it.
+                // Only written when it is a different image from the one above —
+                // an emissive-only material already samples it as its texture.
+                let emis = m3.texture_path_for_layer(mat_idx, "emis1");
+                if !emis.is_empty() {
+                    let glow = images.load(bufs, &emis, TextureRole::Color);
+                    if glow != resolve.texture {
+                        resolve.emissive = glow;
+                        // A version that does not say is read as additive, which
+                        // is what nearly every effect material declares.
+                        resolve.emissive_blend =
+                            m3.mat_emis1_blend_mode(mat_idx).map_or("add", emissive_blend_name);
+                    }
+                }
                 // A textureless effect material carries its colour in the layer.
                 if resolve.texture.is_none() {
                     resolve.color = m3.layer_color(mat_idx, "diff").or_else(|| m3.layer_color(mat_idx, "emis1"));
@@ -289,6 +303,14 @@ impl<'a, 'm> Materials<'a, 'm> {
                 let paths = m3.madd_texture_paths(mat_idx).unwrap_or_default();
                 if let Some(diff) = paths.iter().find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Diff)) {
                     resolve.texture = images.load(bufs, diff, TextureRole::Color);
+                }
+                // MADD names its glow by suffix and stores no blend for it: additive.
+                if let Some(emis) = paths.iter().find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Emis)) {
+                    let glow = images.load(bufs, emis, TextureRole::Color);
+                    if glow != resolve.texture {
+                        resolve.emissive = glow;
+                        resolve.emissive_blend = "add";
+                    }
                 }
                 resolve.blend = blend_name(m3.madd_blend_mode(mat_idx));
             }
@@ -328,6 +350,17 @@ fn blend_name(blend_mode: u32) -> &'static str {
         2 | 3 => "add",
         4 | 5 => "multiply",
         _ => "blend",
+    }
+}
+
+/// M3 `MAT_.blend_mode_emis1` → the blend name written for an effect's emissive
+/// layer. Values are the emissive blend enum: 0 mod, 1 mod 2x, 2 add, 3 blend,
+/// 4 and 5 the team-colour adds.
+fn emissive_blend_name(mode: u32) -> &'static str {
+    match mode {
+        0 | 1 => "multiply",
+        3 => "blend",
+        _ => "add",
     }
 }
 

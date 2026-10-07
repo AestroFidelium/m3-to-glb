@@ -190,6 +190,8 @@ pub struct LayerSpec {
 #[derive(Debug, Clone, Default)]
 pub struct MatSpec {
     pub blend:           u32,
+    /// `blend_mode_emis1`, written at its version's offset (v19 and v20 only).
+    pub emis_blend:      u32,
     pub flags:           u32,
     pub alpha_threshold: u32,
     /// `(layer name, layer)` — `"diff"`, `"norm"`, `"emis1"`, `"ao"`, …
@@ -572,6 +574,9 @@ impl ModelSpec {
         rec[16..20].copy_from_slice(&mat.flags.to_le_bytes());
         rec[20..24].copy_from_slice(&mat.blend.to_le_bytes());
         rec[40..44].copy_from_slice(&mat.alpha_threshold.to_le_bytes());
+        if let Some(at) = M3File::mat_emis1_blend_offset(self.mat_version) {
+            rec[at..at + 4].copy_from_slice(&mat.emis_blend.to_le_bytes());
+        }
         for (name, layer) in &mat.layers {
             let Some(at) = M3File::mat_layer_offset(self.mat_version, name) else { continue };
             let mut l = vec![0u8; layr_record_size(self.layr_version)];

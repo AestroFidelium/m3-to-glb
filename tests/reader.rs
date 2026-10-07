@@ -248,3 +248,16 @@ fn layer_records_past_the_end_of_the_file() {
     assert!(m3.layer_color(0, "diff").is_none());
     assert_eq!(m3.read_layer_uv_tiling(&r), (1.0, 1.0));
 }
+
+#[test]
+fn the_emissive_blend_is_read_where_each_material_version_keeps_it() {
+    for version in [15, 16, 17, 18, 19, 20] {
+        let mut spec = ModelSpec::quad();
+        spec.mat_version = version;
+        spec.materials[0].emis_blend = 3;
+        let bytes = spec.build();
+        let m3 = m3_to_glb::m3::parse(&bytes).unwrap();
+        let want = (version >= 19).then_some(3);
+        assert_eq!(m3.mat_emis1_blend_mode(0), want, "MAT_ v{version}");
+    }
+}
