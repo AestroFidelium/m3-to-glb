@@ -20,7 +20,7 @@
 
 use super::structures::{
     Att, Atvl, Bat, Bone, Cmp, Cms, Div, Iref, Lite, Matm, MdIndexEntry, Par, Proj, Quat,
-    Reference, Regn, Schr, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec3,
+    Reference, Regn, Schr, Sd2v, Sd3v, Sd4q, Sdr3, Sds6, Sdu6, Seqs, SeqsV1, Stc, Stg, Vec2, Vec3,
 };
 use super::{M3Version, detect_version};
 use anyhow::{Result, ensure};
@@ -148,6 +148,38 @@ pub const fn layr_uv_tiling_offset(version: u32) -> usize {
     match version {
         24..=26 => 252,
         _ => 244,
+    }
+}
+
+/// Bytes `LAYR` v24+ inserts before its animated fields (`noise_amplitude`,
+/// `noise_frequency`); v23 only adds fields after `color_brightness`.
+const fn layr_shift(version: u32) -> usize {
+    if version >= 24 { 8 } else { 0 }
+}
+
+/// Offset of `uv_offset` (a `Vector2AnimationReference`) inside a `LAYR` record.
+#[must_use]
+pub const fn layr_uv_offset_offset(version: u32) -> usize {
+    180 + layr_shift(version)
+}
+
+/// The float animation references of a `LAYR` record the converter reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerFloat {
+    /// `color_multiply` — scales the layer's colour (+48, every version).
+    Multiply,
+    /// `color_brightness` — the layer's output scale (+312, +8 from v24).
+    Brightness,
+}
+
+impl LayerFloat {
+    /// Offset of the reference inside a record of `version`.
+    #[must_use]
+    pub const fn offset(self, version: u32) -> usize {
+        match self {
+            Self::Multiply => 48,
+            Self::Brightness => 312 + layr_shift(version),
+        }
     }
 }
 
@@ -929,6 +961,38 @@ impl<'data> M3File<'data> {
         Some([unit(r), unit(g), unit(b), unit(a)])
     }
 
+    /// Where the `LAYR` record of a material's `layer` slot starts, and its tag
+    /// version — `None` for an empty slot.
+    #[must_use]
+    pub fn mat_layer_record(&self, mat_idx: usize, layer: &str) -> Option<(usize, u32)> {
+        let r = self.mat_layer_ref(mat_idx, layer)?;
+        if r.entries == 0 {
+            return None;
+        }
+        let entry = self.tags.get(r.index as usize)?;
+        Some((entry.offset as usize, entry.version))
+    }
+
+    /// A float field of a material layer: its default value and animation id.
+    #[must_use]
+    pub fn layer_float(&self, mat_idx: usize, layer: &str, field: LayerFloat) -> Option<(f32, u32)> {
+        let (start, version) = self.mat_layer_record(mat_idx, layer)?;
+        let at = start + field.offset(version);
+        let id: u32 = self.pod_at(at + 4)?;
+        let default: f32 = self.pod_at(at + 8)?;
+        default.is_finite().then_some((default, id))
+    }
+
+    /// A material layer's `uv_offset`: its default and animation id.
+    #[must_use]
+    pub fn layer_uv_offset(&self, mat_idx: usize, layer: &str) -> Option<([f32; 2], u32)> {
+        let (start, version) = self.mat_layer_record(mat_idx, layer)?;
+        let at = start + layr_uv_offset_offset(version);
+        let id: u32 = self.pod_at(at + 4)?;
+        let default: [f32; 2] = self.pod_at(at + 8)?;
+        default.iter().all(|v| v.is_finite()).then_some((default, id))
+    }
+
     /// Read `uv_tiling.default` from a Layer pointed at by the Reference.
     /// `Vec2AnimRef`: header(8) + `default_x(4)` + `default_y(4)` + ...
     /// Returns `(tiling_x, tiling_y)`, defaulting to (1.0, 1.0).
@@ -1074,6 +1138,26 @@ impl<'data> M3File<'data> {
     pub fn read_ref_quat(&self, r: &Reference) -> Result<Vec<Quat>> {
         if r.entries == 0 { return Ok(Vec::new()); }
         self.read_ref_slice::<Quat>(r)
+    }
+
+    /// Read the SD2V block array referenced by `STC.sd2v`.
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
+    pub fn read_sd2v(&self, r: &Reference) -> Result<Vec<Sd2v>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<Sd2v>(r)
+    }
+
+    /// Read a Reference to a VEC2 array (SD2V key values).
+    ///
+    /// # Errors
+    ///
+    /// The reference points past the tag table, or its records run past the end of the file.
+    pub fn read_ref_vec2(&self, r: &Reference) -> Result<Vec<Vec2>> {
+        if r.entries == 0 { return Ok(Vec::new()); }
+        self.read_ref_slice::<Vec2>(r)
     }
 
     /// Read the SD3V block array referenced by `STC.sd3v`.

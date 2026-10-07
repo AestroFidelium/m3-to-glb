@@ -5,7 +5,18 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Materials carry what glTF cannot say in `extras.m3`: `blend` (`add`,
+  `alpha_add`, `multiply`) for `MAT_`/`MADD` blend modes other than plain alpha,
+  and `uv_scroll` (UV per second) read from the slope of a layer's animated
+  `uv_offset` over the idle sequence — the colour's, the glow's or a mask's.
+
 ### Fixed
+- Emissive and see-through layers honour their `color_multiply` and
+  `color_brightness`: a glow or additive sheet authored at zero (switched on by
+  an animation) no longer draws at full strength at rest.
+- Effect materials with no diffuse bitmap fall back to the emissive or alpha
+  layer's bitmap, so glow and fire emitters stop drawing as solid squares.
 - `MADD` materials (newer Heroes of the Storm models) now carry their blend
   mode: alpha-blended and additive ones export as `alphaMode: BLEND` instead of
   opaque, and effects that use them report the real blend in `extras`. The

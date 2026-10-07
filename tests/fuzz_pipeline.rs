@@ -291,7 +291,7 @@ impl FuzzModel {
                     .iter()
                     .take(4)
                     .map(|l| {
-                        let layer = LayerSpec { texture: name(l.texture), color: l.color, uv_tiling: l.tiling };
+                        let layer = LayerSpec { texture: name(l.texture), color: l.color, uv_tiling: l.tiling, ..LayerSpec::default() };
                         (pick(&LAYERS, l.which), layer)
                     })
                     .collect(),

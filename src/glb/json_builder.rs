@@ -73,6 +73,9 @@ pub struct GltfMaterial {
     pub alpha_mode:         Option<&'static str>, // "MASK" or "BLEND"; None = OPAQUE
     pub alpha_cutoff:       f32,
     pub double_sided:       bool,
+    /// The `m3` object written into the material's `extras` (raw JSON), for
+    /// what glTF has no field for: an additive blend, a scrolling texture.
+    pub m3_extras:          Option<String>,
 }
 
 pub struct GltfMesh {
@@ -329,6 +332,9 @@ fn write_material(j: &mut String, mat: &GltfMaterial) {
     }
     if mat.double_sided {
         j.push_str(r#","doubleSided":true"#);
+    }
+    if let Some(extras) = &mat.m3_extras {
+        let _ = write!(j, r#","extras":{{"m3":{extras}}}"#);
     }
     j.push('}');
 }
