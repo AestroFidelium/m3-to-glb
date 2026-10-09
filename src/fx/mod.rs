@@ -63,6 +63,38 @@ pub struct MaterialResolve {
     pub emissive: Option<usize>,
     /// How that layer composites: `"add"`, `"blend"` or `"multiply"`.
     pub emissive_blend: &'static str,
+    /// Where [`texture`](Self::texture) is read: written beside it.
+    pub uv:      Option<LayerUv>,
+    /// Whether the picture is drawn with its own alpha: its layer reads it, or the
+    /// alpha layer names the same bitmap by its alpha. A picture read as RGB is
+    /// opaque however much alpha its bitmap carries.
+    pub texture_alpha: bool,
+    /// The layer that cuts the picture to shape, when it is not simply the
+    /// picture's own alpha.
+    pub mask:    Option<MaskResolve>,
+}
+
+/// Where a material layer reads its bitmap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayerUv {
+    /// Repetitions across the layer's coordinates, at rest.
+    pub tiling: [f32; 2],
+    /// Whether it reads the particle's flipbook cell (`uv_source` 6) rather than
+    /// the whole quad. Meaningless for a projection, which has no cells.
+    pub cell:   bool,
+}
+
+/// An alpha mask: a bitmap read from one channel that scales the opacity of
+/// whatever the material draws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaskResolve {
+    /// Index into the glTF `textures` array, like [`MaterialResolve::texture`].
+    pub texture: usize,
+    /// `"r"`, `"g"`, `"b"` or `"a"`.
+    pub channel: &'static str,
+    /// Where it is read — usually not where the picture is: a tiling picture cut
+    /// by a mask stretched once across the effect.
+    pub uv:      LayerUv,
 }
 
 // ─── Collected effects ───────────────────────────────────────────────────────
@@ -556,6 +588,10 @@ fn light_json(l: &Lite, curves: &FxCurves) -> String {
 
 // ─── Projections (ground decals) ─────────────────────────────────────────────
 
+/// `PROJ.flags` bit m3studio leaves unnamed (`unknown_flag0x4`), read as "never
+/// expires" — see [`decal_json`].
+const PROJ_LASTING: u32 = 0x4;
+
 fn decal_json(p: &Proj, mat: &MaterialResolve) -> String {
     let mut j = Obj::new();
     j.string("kind", "decal");
@@ -581,6 +617,12 @@ fn decal_json(p: &Proj, mat: &MaterialResolve) -> String {
         s.raw("decay", &range(p.lifetime_decay, p.lifetime_decay_to));
         j.raw("envelope", &s.finish());
     }
+    // A scenery splat — the shadow under a building — keeps the default 1 s
+    // envelope and is drawn for as long as the map is. Flag 0x4 is set on every
+    // scenery projection in the shipped maps and on no spell's: read as lasting.
+    if p.flags & PROJ_LASTING != 0 {
+        j.bool("persistent", true);
+    }
     material_json(&mut j, mat);
     j.finish()
 }
@@ -591,6 +633,16 @@ fn material_json(j: &mut Obj, mat: &MaterialResolve) {
     if let Some(t) = mat.texture {
         // Bevy loads this as `asset_server.load(format!("{glb}#Texture{n}"))`.
         j.string("texture", &format!("#Texture{t}"));
+        if let Some(uv) = mat.uv {
+            j.raw("uv", &uv_json(uv, None));
+        }
+        j.bool("texture_alpha", mat.texture_alpha);
+    }
+    if let Some(mask) = mat.mask {
+        let mut m = Obj::new();
+        m.string("texture", &format!("#Texture{}", mask.texture));
+        m.string("channel", mask.channel);
+        j.raw("mask", &uv_json(mask.uv, Some(m)));
     }
     if let Some(c) = mat.color {
         j.vec4("tint", c);
@@ -602,6 +654,15 @@ fn material_json(j: &mut Obj, mat: &MaterialResolve) {
         j.string("emissive", &format!("#Texture{e}"));
         j.string("emissive_blend", mat.emissive_blend);
     }
+}
+
+/// A layer's coordinates — `{tiling, cell}` — written into `into`, or into an
+/// object of their own.
+fn uv_json(uv: LayerUv, into: Option<Obj>) -> String {
+    let mut j = into.unwrap_or_else(Obj::new);
+    j.vec2("tiling", uv.tiling);
+    j.bool("cell", uv.cell);
+    j.finish()
 }
 
 /// A `[min, max]` range. M3 leaves the upper bound at zero for a fixed value.

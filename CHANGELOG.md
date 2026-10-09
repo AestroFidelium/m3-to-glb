@@ -14,6 +14,17 @@ versions follow [SemVer](https://semver.org/).
   it as `emissive` (`#TextureN`) with `emissive_blend`, read from
   `MAT_.blend_mode_emis1` (or additive for `MADD` and older `MAT_` versions).
   The additive glow was the bright half of most bursts and was dropped.
+- Effects carry their material's alpha mask as `mask` (`texture`, `channel`,
+  `tiling`, `cell`) when it is not simply the picture's own alpha, and the
+  picture's own coordinates as `uv` (`tiling`, `cell`), and whether it is drawn
+  with its own alpha as `texture_alpha`. A ground ring is a
+  tiling picture cut to shape by a mask, read from one channel on its own
+  tiling; without it the picture filled the whole projection box.
+- Projections drawn with a splat-terrain-bake material (`STBM`, every scenery
+  projection in the shipped maps) export its diffuse as their `texture`; they
+  had none.
+- Projections flagged `0x4` write `"persistent": true` — they never expire, and
+  their envelope (the unauthored 1 s default) does not apply.
 
 ### Fixed
 - The doc comment on `mat_blend_mode` carried a different, wrong enum table
@@ -21,8 +32,10 @@ versions follow [SemVer](https://semver.org/).
 - Emissive and see-through layers honour their `color_multiply` and
   `color_brightness`: a glow or additive sheet authored at zero (switched on by
   an animation) no longer draws at full strength at rest.
-- Effect materials with no diffuse bitmap fall back to the emissive or alpha
-  layer's bitmap, so glow and fire emitters stop drawing as solid squares.
+- Effect materials with no diffuse bitmap fall back to the emissive layer's
+  bitmap, so glow and fire emitters stop drawing as solid squares. An alpha
+  layer's bitmap is the material's `mask`, never its picture: sampled as the
+  picture it also tinted the colour by the mask.
 - `MADD` materials (newer Heroes of the Storm models) now carry their blend
   mode: alpha-blended and additive ones export as `alphaMode: BLEND` instead of
   opaque, and effects that use them report the real blend in `extras`. The

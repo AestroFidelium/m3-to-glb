@@ -122,6 +122,26 @@ fn light_and_decal_extras_parse() {
 }
 
 #[test]
+fn a_projection_that_never_expires_says_so() {
+    // Scenery splats — the shadow under a building — carry the default 1 s
+    // envelope and are drawn for as long as the map is: their flag `0x4`, set on
+    // every scenery projection and on no spell's, marks them as lasting.
+    for (flags, lasting) in [(0x4, true), (0xc, true), (0xd, true), (0x8, false), (0x9, false), (0, false)] {
+        let mut proj = Proj::zeroed();
+        proj.flags = flags;
+        let item = FxItem {
+            name:       "PROJ0_test".into(),
+            bone:       0,
+            matm_index: Some(0),
+            kind:       FxKind::Decal(Box::new(proj)),
+        };
+        let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("decal JSON");
+        assert_eq!(v["m3fx"].get("persistent").is_some_and(|p| p == true), lasting, "flags {flags:#x}: {v}");
+    }
+}
+
+#[test]
 fn effect_names_survive_a_json_string() {
     // Bone names come from the file; a quote in one would otherwise split the
     // JSON chunk in half.
