@@ -16,7 +16,8 @@ versions follow [SemVer](https://semver.org/).
   The additive glow was the bright half of most bursts and was dropped.
 - Effects carry their material's alpha mask as `mask` (`texture`, `channel`,
   `tiling`, `cell`) when it is not simply the picture's own alpha, and the
-  picture's own coordinates as `uv` (`tiling`, `cell`). A ground ring is a
+  picture's own coordinates as `uv` (`tiling`, `cell`), and whether it is drawn
+  with its own alpha as `texture_alpha`. A ground ring is a
   tiling picture cut to shape by a mask, read from one channel on its own
   tiling; without it the picture filled the whole projection box.
 - Projections drawn with a splat-terrain-bake material (`STBM`, every scenery

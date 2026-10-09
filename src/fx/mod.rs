@@ -65,6 +65,10 @@ pub struct MaterialResolve {
     pub emissive_blend: &'static str,
     /// Where [`texture`](Self::texture) is read: written beside it.
     pub uv:      Option<LayerUv>,
+    /// Whether the picture is drawn with its own alpha: its layer reads it, or the
+    /// alpha layer names the same bitmap by its alpha. A picture read as RGB is
+    /// opaque however much alpha its bitmap carries.
+    pub texture_alpha: bool,
     /// The layer that cuts the picture to shape, when it is not simply the
     /// picture's own alpha.
     pub mask:    Option<MaskResolve>,
@@ -632,6 +636,7 @@ fn material_json(j: &mut Obj, mat: &MaterialResolve) {
         if let Some(uv) = mat.uv {
             j.raw("uv", &uv_json(uv, None));
         }
+        j.bool("texture_alpha", mat.texture_alpha);
     }
     if let Some(mask) = mat.mask {
         let mut m = Obj::new();

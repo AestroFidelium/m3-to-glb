@@ -952,8 +952,8 @@ fn an_alpha_mask_travels_beside_the_picture_with_its_channel_and_coordinates() {
 #[test]
 fn a_mask_that_is_the_pictures_own_alpha_is_not_written_twice() {
     // Most materials name the same bitmap as diffuse and mask. Read from its
-    // alpha that is just the picture's alpha; read from a colour channel it is
-    // a real mask over the same image.
+    // alpha that is just the picture's alpha — the picture is drawn with it;
+    // read from a colour channel it is a real mask over the same image.
     for (channels, masked) in [(2, false), (1, false), (4, true)] {
         let dir = texture_dir(&["flake_diff.png"]);
         let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
@@ -965,10 +965,28 @@ fn a_mask_that_is_the_pictures_own_alpha_is_not_written_twice() {
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = fx_of(&g, "particle", 0);
         assert_eq!(fx.get("mask").is_some(), masked, "channels {channels}: {fx}");
+        assert_eq!(fx["texture_alpha"], !masked, "channels {channels}: {fx}");
         if masked {
             assert_eq!(fx["mask"]["texture"], "#Texture0", "{fx}");
         }
         assert_eq!(g.count("images"), 1, "one image, however many layers name it");
+    }
+}
+
+#[test]
+fn a_picture_is_drawn_with_its_alpha_only_when_its_layer_reads_it() {
+    // A layer reads the channels it names: a diffuse read as RGB is opaque however
+    // much alpha its bitmap carries — a ground ring's tiling ice keeps a crack map
+    // there, and the ring's shape comes from its mask alone.
+    for (channels, with_alpha) in [(0, false), (1, true), (3, false), (4, false)] {
+        let dir = texture_dir(&["ice_diff.png"]);
+        let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+        let mut spec = with_effects();
+        spec.materials[0].layers =
+            vec![("diff", LayerSpec { texture: "ice_diff.dds".into(), channels, ..LayerSpec::default() })];
+        let g = convert_with(&spec, &Converter::new().textures(&cache));
+        let fx = fx_of(&g, "particle", 0);
+        assert_eq!(fx["texture_alpha"], with_alpha, "channels {channels}: {fx}");
     }
 }
 
@@ -985,5 +1003,6 @@ fn a_terrain_splat_projection_draws_its_bake_diffuse() {
     let g = convert_with(&spec, &Converter::new().textures(&cache));
     let decal = fx_of(&g, "decal", 0);
     assert_eq!(decal["texture"], "#Texture0", "{decal}");
+    assert_eq!(decal["texture_alpha"], true, "a splat's diffuse carries its own alpha: {decal}");
     assert_eq!(decal["blend"], "blend", "{decal}");
 }

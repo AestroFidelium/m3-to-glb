@@ -306,7 +306,15 @@ impl<'a, 'm> Materials<'a, 'm> {
                 if resolve.texture.is_none() {
                     resolve.color = m3.layer_color(mat_idx, "diff").or_else(|| m3.layer_color(mat_idx, "emis1"));
                 }
-                resolve.mask = self.mask(mat_idx, resolve.texture, bufs, images);
+                // The alpha layer naming the picture's own bitmap by its alpha is no
+                // mask: the picture is drawn with its alpha instead.
+                let alpha_layer = self.alpha_layer(mat_idx, bufs, images);
+                let own_alpha = alpha_layer
+                    .is_some_and(|mask| Some(mask.texture) == resolve.texture && mask.channel == "a");
+                let reads_alpha = picture
+                    .is_some_and(|(layer, _)| m3.layer_channels(mat_idx, layer) == Some(CHANNELS_ARGB));
+                resolve.texture_alpha = resolve.texture.is_some() && (own_alpha || reads_alpha);
+                resolve.mask = alpha_layer.filter(|_| !own_alpha);
                 resolve.blend = blend_name(m3.mat_blend_mode(mat_idx));
             }
             MAT_SPLAT_BAKE if mat_idx < m3.splat_bake_count() => {
@@ -315,6 +323,7 @@ impl<'a, 'm> Materials<'a, 'm> {
                 let path = m3.splat_bake_texture_path(mat_idx);
                 resolve.texture = (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten();
                 resolve.uv = resolve.texture.map(|_| fx::LayerUv { tiling: [1.0, 1.0], cell: false });
+                resolve.texture_alpha = resolve.texture.is_some();
                 resolve.blend = "blend";
             }
             MAT_MADD if mat_idx < self.madd_count => {
@@ -344,29 +353,21 @@ impl<'a, 'm> Materials<'a, 'm> {
         fx::LayerUv { tiling: [x, y], cell }
     }
 
-    /// The alpha mask of `MAT_` record `mat_idx`, when its alpha layer carries a
-    /// bitmap that is not simply `picture`'s own alpha read again — what most
-    /// materials name, and what the picture already carries.
-    fn mask(
-        &self,
-        mat_idx: usize,
-        picture: Option<usize>,
-        bufs: &mut Buffers,
-        images: &mut Images<'_>,
-    ) -> Option<fx::MaskResolve> {
+    /// The alpha layer of `MAT_` record `mat_idx` as a mask, when it carries a
+    /// bitmap.
+    fn alpha_layer(&self, mat_idx: usize, bufs: &mut Buffers, images: &mut Images<'_>) -> Option<fx::MaskResolve> {
         let path = self.m3.texture_path_for_layer(mat_idx, "alpha1");
         if path.is_empty() {
             return None;
         }
         let texture = images.load(bufs, &path, TextureRole::Color)?;
         let channel = mask_channel(self.m3.layer_channels(mat_idx, "alpha1").unwrap_or(MASK_ALPHA));
-        if Some(texture) == picture && channel == "a" {
-            return None;
-        }
         Some(fx::MaskResolve { texture, channel, uv: self.layer_uv(mat_idx, "alpha1") })
     }
 }
 
+/// `color_channels` of a layer that reads every channel of its bitmap, alpha too.
+const CHANNELS_ARGB: u32 = 1;
 /// `color_channels` of a layer that reads only its bitmap's alpha.
 const MASK_ALPHA: u32 = 2;
 

@@ -124,6 +124,7 @@ folded values.
   "flipbook": {"cols": 8, "rows": 8, "start": [1, 4], "end": [60, 63],
                "random_start": true},
   "texture": "#Texture0",
+  "texture_alpha": false,
   "uv": {"tiling": [1, 1], "cell": true},
   "mask": {"texture": "#Texture1", "channel": "g", "tiling": [1, 2], "cell": false},
   "tint": [1, 1, 1, 1],
@@ -161,6 +162,7 @@ only `kind`, `capacity`, `spawn`, `lifetime`, `speed`, `emit_type`, `shape`,
 | `flipbook` | Sprite-sheet atlas. The frame starts somewhere in `start` and walks to somewhere in `end` over `lifespan_factor` of the life |
 | `blend` | `opaque` · `blend` · `add` · `multiply` |
 | `texture` | The picture: the material's diffuse bitmap, else its emissive one. Absent for a flat-colour material, which carries `tint` instead |
+| `texture_alpha` | Whether the picture is drawn with its own alpha — its layer reads ARGB, or the alpha layer names the same bitmap by its alpha. `false`: the picture is opaque, whatever its bitmap's alpha holds; its shape is the `mask`'s |
 | `uv` | Where `texture` is read: `tiling` (repetitions, at rest) and `cell` — `true` when the layer reads the emitter's flipbook cell (`uv_source` 6), `false` when it reads the whole quad. A layer that does not follow the flipbook samples the whole sheet across every particle |
 | `mask` | The material's alpha mask, when it is not simply the picture's own alpha: `texture`, the `channel` it is read from (`r` · `g` · `b` · `a`), and its own `tiling` and `cell`. It scales the opacity of everything the material draws — picture or `tint` — so a tiling picture is cut to a ring, or a flat colour to a spark. Never the picture itself |
 | `emissive` | The material's glow bitmap, `"#TextureN"`, when it is a different image from `texture` — drawn over the particle with `emissive_blend` |
@@ -188,7 +190,8 @@ value is zero.
 {"m3fx": {"kind": "decal", "projection": "ortho", "size": [9.5, 9.5, 3],
           "euler": [0, 0, 0], "alpha": [0, 1, 0],
           "envelope": {"attack": [0.33, 0.33], "hold": [20, 20], "decay": [1, 1]},
-          "texture": "#Texture3", "uv": {"tiling": [1.5, 1.5], "cell": false},
+          "texture": "#Texture3", "texture_alpha": false,
+          "uv": {"tiling": [1.5, 1.5], "cell": false},
           "mask": {"texture": "#Texture4", "channel": "g", "tiling": [1, 1], "cell": false},
           "blend": "blend"}}
 ```
