@@ -405,6 +405,17 @@ fn unsupported_material_types_skip_the_region() {
 }
 
 #[test]
+fn a_region_drawn_with_a_splat_bake_material_is_skipped() {
+    // A splat-terrain-bake material shapes the terrain it is baked into; a region
+    // drawn with it has nothing glTF can draw, and drawn anyway it is a flat
+    // placeholder colour on the map. Only projections read it.
+    let mut spec = ModelSpec::quad();
+    spec.splat_bakes = vec![LayerSpec { texture: "splat.dds".into(), ..LayerSpec::default() }];
+    spec.matms = vec![(9, 0)];
+    assert_eq!(convert(&spec).count("meshes"), 0);
+}
+
+#[test]
 fn material_index_past_the_table_is_dropped() {
     let mut spec = ModelSpec::quad();
     spec.matms = vec![(1, 7)];

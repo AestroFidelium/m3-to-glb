@@ -720,8 +720,10 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Resolve a MATM index to a *renderable* MATM index (`MAT_`=1 / `STBM`=9 /
-    /// `MADD`=12).
+    /// Resolve a MATM index to a *renderable* MATM index (`MAT_`=1 / `MADD`=12).
+    /// A splat-terrain-bake material (`STBM`, 9) is not one: a mesh region drawn
+    /// with it is a shape baked into the terrain, which glTF has no way to say —
+    /// only projections draw with it, and they read it directly.
     ///
     /// Composite materials (`CMP_`, type 3) layer several sub-materials; glTF
     /// can't express that compositing, so — like the reference importer, which
@@ -738,9 +740,7 @@ impl<'data> M3File<'data> {
         if depth > 8 { return None; }
         let matm = matms.get(idx)?;
         match matm.mat_type {
-            // Standard, node-based (MADD) and splat-terrain-bake (STBM, which
-            // only projections draw with).
-            1 | 9 | 12 => Some(idx),
+            1 | 12 => Some(idx),
             3 => {
                 let cmp = composites.get(matm.material_index as usize)?;
                 let sections = self.read_ref_slice::<Cms>(&cmp.sections).ok()?;
