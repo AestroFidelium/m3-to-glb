@@ -883,18 +883,107 @@ fn a_glow_that_is_the_diffuse_or_the_only_bitmap_is_not_written_twice() {
 }
 
 #[test]
-fn an_effect_with_no_diffuse_bitmap_samples_its_glow_or_mask() {
-    // Fire and glow emitters often draw a flat colour through an emissive or alpha
-    // layer's bitmap; without it every particle is a solid square.
-    for slot in ["emis1", "alpha1"] {
-        let dir = texture_dir(&["flame_emis.png"]);
+fn a_colour_drawn_through_a_glow_samples_the_glow() {
+    // Fire and glow emitters often draw a flat colour through an emissive bitmap;
+    // without it every particle is a solid square.
+    let dir = texture_dir(&["flame_emis.png"]);
+    let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+    let mut spec = with_effects();
+    spec.materials[0].layers = vec![
+        ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
+        ("emis1", LayerSpec { texture: "flame_emis.dds".into(), ..LayerSpec::default() }),
+    ];
+    let g = convert_with(&spec, &Converter::new().textures(&cache));
+    let fx = &g.extras("m3fx")[0];
+    assert_eq!(fx["texture"], "#Texture0", "{fx}");
+    assert!(fx.get("mask").is_none(), "{fx}");
+}
+
+#[test]
+fn a_colour_cut_by_a_mask_is_the_colour_and_the_mask() {
+    // A flat colour shaped by an alpha bitmap: the bitmap is the shape, not the
+    // picture. Sampling it as the picture would also tint by it and, read as a
+    // picture, leave every particle of a blended emitter a square.
+    let dir = texture_dir(&["spark_mask.png"]);
+    let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+    let mut spec = with_effects();
+    spec.materials[0].layers = vec![
+        ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
+        ("alpha1", LayerSpec { texture: "spark_mask.dds".into(), channels: 3, ..LayerSpec::default() }),
+    ];
+    let g = convert_with(&spec, &Converter::new().textures(&cache));
+    let fx = &g.extras("m3fx")[0];
+    assert!(fx.get("texture").is_none(), "{fx}");
+    assert!(fx.get("tint").is_some(), "the colour is the picture: {fx}");
+    assert_eq!(fx["mask"]["texture"], "#Texture0", "{fx}");
+    assert_eq!(fx["mask"]["channel"], "r", "{fx}");
+}
+
+/// The effect node of `kind` (`"particle"`, `"decal"`, …) at `n` among its kind.
+fn fx_of<'g>(g: &'g GlbSummary, kind: &str, n: usize) -> &'g Value {
+    g.extras("m3fx").into_iter().filter(|fx| fx["kind"] == kind).nth(n).expect("no such effect")
+}
+
+#[test]
+fn an_alpha_mask_travels_beside_the_picture_with_its_channel_and_coordinates() {
+    // A ground ring is a tiling picture cut to shape by a mask: its own bitmap,
+    // read from one channel, on its own tiling and its own coordinates.
+    for (channels, name) in [(0, "r"), (1, "a"), (2, "a"), (3, "r"), (4, "g"), (5, "b"), (77, "a")] {
+        let dir = texture_dir(&["ice_diff.png", "ring_mask.png"]);
         let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
         let mut spec = with_effects();
         spec.materials[0].layers = vec![
-            ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
-            (slot, LayerSpec { texture: "flame_emis.dds".into(), ..LayerSpec::default() }),
+            ("diff", LayerSpec { texture: "ice_diff.dds".into(), uv_tiling: [1.5, 3.0], uv_source: 6, ..LayerSpec::default() }),
+            ("alpha1", LayerSpec { texture: "ring_mask.dds".into(), channels, uv_tiling: [1.0, 2.0], ..LayerSpec::default() }),
         ];
         let g = convert_with(&spec, &Converter::new().textures(&cache));
-        assert_eq!(g.extras("m3fx")[0]["texture"], "#Texture0", "{slot}");
+        let fx = fx_of(&g, "particle", 0);
+        assert_eq!(fx["texture"], "#Texture0", "{fx}");
+        assert_eq!((f(&fx["uv"]["tiling"][0]), f(&fx["uv"]["tiling"][1])), (1.5, 3.0), "{fx}");
+        assert_eq!(fx["uv"]["cell"], true, "the picture reads the flipbook cell: {fx}");
+        let mask = &fx["mask"];
+        assert_eq!(mask["texture"], "#Texture1", "{fx}");
+        assert_eq!(mask["channel"], name, "channels {channels}");
+        assert_eq!((f(&mask["tiling"][0]), f(&mask["tiling"][1])), (1.0, 2.0), "{fx}");
+        assert_eq!(mask["cell"], false, "the mask reads the whole quad: {fx}");
     }
+}
+
+#[test]
+fn a_mask_that_is_the_pictures_own_alpha_is_not_written_twice() {
+    // Most materials name the same bitmap as diffuse and mask. Read from its
+    // alpha that is just the picture's alpha; read from a colour channel it is
+    // a real mask over the same image.
+    for (channels, masked) in [(2, false), (1, false), (4, true)] {
+        let dir = texture_dir(&["flake_diff.png"]);
+        let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+        let mut spec = with_effects();
+        spec.materials[0].layers = vec![
+            ("diff", LayerSpec { texture: "flake_diff.dds".into(), ..LayerSpec::default() }),
+            ("alpha1", LayerSpec { texture: "flake_diff.dds".into(), channels, ..LayerSpec::default() }),
+        ];
+        let g = convert_with(&spec, &Converter::new().textures(&cache));
+        let fx = fx_of(&g, "particle", 0);
+        assert_eq!(fx.get("mask").is_some(), masked, "channels {channels}: {fx}");
+        if masked {
+            assert_eq!(fx["mask"]["texture"], "#Texture0", "{fx}");
+        }
+        assert_eq!(g.count("images"), 1, "one image, however many layers name it");
+    }
+}
+
+#[test]
+fn a_terrain_splat_projection_draws_its_bake_diffuse() {
+    // Every projection a map's scenery carries is a splat-terrain-bake material:
+    // a diffuse, a normal and a specular layer, no blend of its own.
+    let dir = texture_dir(&["shadow_splat.png"]);
+    let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
+    let mut spec = with_effects();
+    spec.splat_bakes = vec![LayerSpec { texture: "shadow_splat.dds".into(), ..LayerSpec::default() }];
+    spec.matms.push((9, 0));
+    spec.projections[0].material_reference_index = u32::try_from(spec.matms.len() - 1).unwrap();
+    let g = convert_with(&spec, &Converter::new().textures(&cache));
+    let decal = fx_of(&g, "decal", 0);
+    assert_eq!(decal["texture"], "#Texture0", "{decal}");
+    assert_eq!(decal["blend"], "blend", "{decal}");
 }

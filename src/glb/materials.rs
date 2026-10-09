@@ -12,8 +12,13 @@ use tracing::debug;
 
 /// `MATM.mat_type` of a standard material (`MAT_`).
 const MAT_STANDARD: u32 = 1;
+/// `MATM.mat_type` of a splat-terrain-bake material (`STBM`): what a map's
+/// scenery projections draw with.
+const MAT_SPLAT_BAKE: u32 = 9;
 /// `MATM.mat_type` of a node-based material (`MADD`, newer HotS heroes).
 const MAT_MADD: u32 = 12;
+/// `uv_source` of a layer that reads the particle's flipbook cell.
+const UV_SOURCE_FLIPBOOK: u32 = 6;
 
 /// Material context: the model's material tables plus where textures go.
 pub(super) struct Materials<'a, 'm> {
@@ -272,13 +277,17 @@ impl<'a, 'm> Materials<'a, 'm> {
         let mut resolve = fx::MaterialResolve::default();
         match matm.mat_type {
             MAT_STANDARD if mat_idx < self.mat_count => {
-                // The diffuse bitmap, else the one an emissive or mask layer carries:
-                // fire and glow are often a flat colour drawn through a glow or
-                // alpha sprite, and without it every particle is a solid square.
-                resolve.texture = ["diff", "emis1", "alpha1", "emis2"].iter().find_map(|l| {
-                    let path = m3.texture_path_for_layer(mat_idx, l);
-                    (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten()
+                // The diffuse bitmap, else the one an emissive layer carries: fire
+                // and glow are often a flat colour drawn through a glow sprite.
+                // An alpha layer's bitmap is never the picture — it is the shape
+                // the picture is cut to (the mask, below).
+                let picture = ["diff", "emis1", "emis2"].into_iter().find_map(|layer| {
+                    let path = m3.texture_path_for_layer(mat_idx, layer);
+                    let texture = (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color))??;
+                    Some((layer, texture))
                 });
+                resolve.texture = picture.map(|(_, texture)| texture);
+                resolve.uv = picture.map(|(layer, _)| self.layer_uv(mat_idx, layer));
                 // The glow beside a diffuse bitmap is its own layer, drawn over it.
                 // Only written when it is a different image from the one above —
                 // an emissive-only material already samples it as its texture.
@@ -297,7 +306,16 @@ impl<'a, 'm> Materials<'a, 'm> {
                 if resolve.texture.is_none() {
                     resolve.color = m3.layer_color(mat_idx, "diff").or_else(|| m3.layer_color(mat_idx, "emis1"));
                 }
+                resolve.mask = self.mask(mat_idx, resolve.texture, bufs, images);
                 resolve.blend = blend_name(m3.mat_blend_mode(mat_idx));
+            }
+            MAT_SPLAT_BAKE if mat_idx < m3.splat_bake_count() => {
+                // Diffuse, normal and specular, drawn over the ground; no blend
+                // of its own, and the diffuse carries its own alpha.
+                let path = m3.splat_bake_texture_path(mat_idx);
+                resolve.texture = (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten();
+                resolve.uv = resolve.texture.map(|_| fx::LayerUv { tiling: [1.0, 1.0], cell: false });
+                resolve.blend = "blend";
             }
             MAT_MADD if mat_idx < self.madd_count => {
                 let paths = m3.madd_texture_paths(mat_idx).unwrap_or_default();
@@ -317,6 +335,51 @@ impl<'a, 'm> Materials<'a, 'm> {
             t => debug!("effect material type {} — unsupported", t),
         }
         resolve
+    }
+
+    /// Where a `MAT_` layer reads its bitmap.
+    fn layer_uv(&self, mat_idx: usize, layer: &str) -> fx::LayerUv {
+        let (x, y) = self.m3.layer_uv_tiling(mat_idx, layer);
+        let cell = self.m3.layer_uv_source(mat_idx, layer) == Some(UV_SOURCE_FLIPBOOK);
+        fx::LayerUv { tiling: [x, y], cell }
+    }
+
+    /// The alpha mask of `MAT_` record `mat_idx`, when its alpha layer carries a
+    /// bitmap that is not simply `picture`'s own alpha read again — what most
+    /// materials name, and what the picture already carries.
+    fn mask(
+        &self,
+        mat_idx: usize,
+        picture: Option<usize>,
+        bufs: &mut Buffers,
+        images: &mut Images<'_>,
+    ) -> Option<fx::MaskResolve> {
+        let path = self.m3.texture_path_for_layer(mat_idx, "alpha1");
+        if path.is_empty() {
+            return None;
+        }
+        let texture = images.load(bufs, &path, TextureRole::Color)?;
+        let channel = mask_channel(self.m3.layer_channels(mat_idx, "alpha1").unwrap_or(MASK_ALPHA));
+        if Some(texture) == picture && channel == "a" {
+            return None;
+        }
+        Some(fx::MaskResolve { texture, channel, uv: self.layer_uv(mat_idx, "alpha1") })
+    }
+}
+
+/// `color_channels` of a layer that reads only its bitmap's alpha.
+const MASK_ALPHA: u32 = 2;
+
+/// The channel an alpha layer's `color_channels` reads its mask from:
+/// 0 RGB, 1 ARGB, 2 A, 3 R, 4 G, 5 B (m3studio `material_layer_channel`). RGB
+/// reads as red — a grey mask's every channel is the same — and anything else as
+/// alpha, what an alpha layer reads by name.
+fn mask_channel(channels: u32) -> &'static str {
+    match channels {
+        0 | 3 => "r",
+        4 => "g",
+        5 => "b",
+        _ => "a",
     }
 }
 

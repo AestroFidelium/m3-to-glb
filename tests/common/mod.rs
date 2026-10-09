@@ -185,6 +185,11 @@ pub struct LayerSpec {
     pub brightness: Option<(f32, u32)>,
     /// `uv_offset` as `(default, animation id)`; `None` writes `([0, 0], 0)`.
     pub uv_offset: Option<([f32; 2], u32)>,
+    /// `uv_source`: 0 the mesh's first UV set (a particle's whole quad), 6 the
+    /// particle's flipbook cell, …
+    pub uv_source: u32,
+    /// `color_channels`: 0 RGB, 1 ARGB, 2 alpha, 3 red, 4 green, 5 blue.
+    pub channels:  u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -246,6 +251,8 @@ pub struct ModelSpec {
     pub materials:    Vec<MatSpec>,
     pub madd_version: u32,
     pub madds:        Vec<Vec<String>>,
+    /// `STBM` splat-terrain-bake materials, each its diffuse layer.
+    pub splat_bakes:  Vec<LayerSpec>,
     /// `blend_mode` of each MADD, index-aligned with `madds`; missing = 0.
     pub madd_blends:  Vec<u32>,
     pub matms:        Vec<(u32, u32)>,
@@ -285,6 +292,7 @@ impl Default for ModelSpec {
             materials:      Vec::new(),
             madd_version:   3,
             madds:          Vec::new(),
+            splat_bakes:    Vec::new(),
             madd_blends:    Vec::new(),
             matms:          Vec::new(),
             composites:     Vec::new(),
@@ -469,6 +477,18 @@ impl ModelSpec {
             })
             .collect();
         w.records("MADD", self.madd_version, &madds);
+        // name | diff | norm | spec, each a reference; only the diffuse is filled.
+        let bakes: Vec<Vec<u8>> = self
+            .splat_bakes
+            .iter()
+            .map(|diff| {
+                let mut rec = vec![0u8; 48];
+                let r = self.layer(w, diff);
+                rec[12..24].copy_from_slice(bytemuck::bytes_of(&r));
+                rec
+            })
+            .collect();
+        w.records("STBM", 0, &bakes);
         let matms: Vec<Matm> = self.matms.iter().map(|&(t, i)| Matm { mat_type: t, material_index: i }).collect();
         w.pods("MATM", 0, &matms);
         let cmps: Vec<Vec<u8>> = self
@@ -579,30 +599,37 @@ impl ModelSpec {
         }
         for (name, layer) in &mat.layers {
             let Some(at) = M3File::mat_layer_offset(self.mat_version, name) else { continue };
-            let mut l = vec![0u8; layr_record_size(self.layr_version)];
-            let bitmap = w.chars(&layer.texture);
-            l[4..16].copy_from_slice(bytemuck::bytes_of(&bitmap));
-            if let Some(c) = layer.color {
-                l[24..28].copy_from_slice(&c);
-                l[36..40].copy_from_slice(&0x400u32.to_le_bytes());
-            }
-            let t = layr_uv_tiling_offset(self.layr_version) + 8;
-            l[t..t + 8].copy_from_slice(bytemuck::bytes_of(&layer.uv_tiling));
-            let mut float = |field: LayerFloat, (default, id): (f32, u32)| {
-                let f = field.offset(self.layr_version);
-                l[f + 4..f + 8].copy_from_slice(&id.to_le_bytes());
-                l[f + 8..f + 12].copy_from_slice(&default.to_le_bytes());
-            };
-            float(LayerFloat::Multiply, layer.multiply.unwrap_or((1.0, 0)));
-            float(LayerFloat::Brightness, layer.brightness.unwrap_or((1.0, 0)));
-            let (offset, id) = layer.uv_offset.unwrap_or(([0.0; 2], 0));
-            let uv = layr_uv_offset_offset(self.layr_version);
-            l[uv + 4..uv + 8].copy_from_slice(&id.to_le_bytes());
-            l[uv + 8..uv + 16].copy_from_slice(bytemuck::bytes_of(&offset));
-            let r = w.records("LAYR", self.layr_version, &[l]);
+            let r = self.layer(w, layer);
             rec[at..at + 12].copy_from_slice(bytemuck::bytes_of(&r));
         }
         rec
+    }
+
+    /// One `LAYR` record, written as its own tag.
+    fn layer(&self, w: &mut M3Writer, layer: &LayerSpec) -> Reference {
+        let mut l = vec![0u8; layr_record_size(self.layr_version)];
+        let bitmap = w.chars(&layer.texture);
+        l[4..16].copy_from_slice(bytemuck::bytes_of(&bitmap));
+        if let Some(c) = layer.color {
+            l[24..28].copy_from_slice(&c);
+            l[36..40].copy_from_slice(&0x400u32.to_le_bytes());
+        }
+        l[40..44].copy_from_slice(&layer.uv_source.to_le_bytes());
+        l[44..48].copy_from_slice(&layer.channels.to_le_bytes());
+        let t = layr_uv_tiling_offset(self.layr_version) + 8;
+        l[t..t + 8].copy_from_slice(bytemuck::bytes_of(&layer.uv_tiling));
+        let mut float = |field: LayerFloat, (default, id): (f32, u32)| {
+            let f = field.offset(self.layr_version);
+            l[f + 4..f + 8].copy_from_slice(&id.to_le_bytes());
+            l[f + 8..f + 12].copy_from_slice(&default.to_le_bytes());
+        };
+        float(LayerFloat::Multiply, layer.multiply.unwrap_or((1.0, 0)));
+        float(LayerFloat::Brightness, layer.brightness.unwrap_or((1.0, 0)));
+        let (offset, id) = layer.uv_offset.unwrap_or(([0.0; 2], 0));
+        let uv = layr_uv_offset_offset(self.layr_version);
+        l[uv + 4..uv + 8].copy_from_slice(&id.to_le_bytes());
+        l[uv + 8..uv + 16].copy_from_slice(bytemuck::bytes_of(&offset));
+        w.records("LAYR", self.layr_version, &[l])
     }
 }
 

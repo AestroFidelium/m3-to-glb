@@ -720,7 +720,8 @@ impl<'data> M3File<'data> {
         }
     }
 
-    /// Resolve a MATM index to a *renderable* MATM index (`MAT_`=1 / `MADD`=12).
+    /// Resolve a MATM index to a *renderable* MATM index (`MAT_`=1 / `STBM`=9 /
+    /// `MADD`=12).
     ///
     /// Composite materials (`CMP_`, type 3) layer several sub-materials; glTF
     /// can't express that compositing, so — like the reference importer, which
@@ -737,7 +738,9 @@ impl<'data> M3File<'data> {
         if depth > 8 { return None; }
         let matm = matms.get(idx)?;
         match matm.mat_type {
-            1 | 12 => Some(idx),
+            // Standard, node-based (MADD) and splat-terrain-bake (STBM, which
+            // only projections draw with).
+            1 | 9 | 12 => Some(idx),
             3 => {
                 let cmp = composites.get(matm.material_index as usize)?;
                 let sections = self.read_ref_slice::<Cms>(&cmp.sections).ok()?;
@@ -1005,6 +1008,55 @@ impl<'data> M3File<'data> {
         let id: u32 = self.pod_at(at + 4)?;
         let default: f32 = self.pod_at(at + 8)?;
         default.is_finite().then_some((default, id))
+    }
+
+    /// A material layer's `uv_source` (+40, every version): where its texture
+    /// coordinates come from — 0 the mesh's first UV set (a particle's whole
+    /// quad), 6 the particle's flipbook cell, 5 a planar projection along world
+    /// Z, … (m3studio `uv_source`). `None` for an empty slot.
+    #[must_use]
+    pub fn layer_uv_source(&self, mat_idx: usize, layer: &str) -> Option<u32> {
+        let (start, _) = self.mat_layer_record(mat_idx, layer)?;
+        self.pod_at(start + 40)
+    }
+
+    /// A material layer's `color_channels` (+44, every version): which channels
+    /// of its bitmap it reads — 0 RGB, 1 ARGB, 2 alpha, 3 red, 4 green, 5 blue
+    /// (m3studio `material_layer_channel`). `None` for an empty slot.
+    #[must_use]
+    pub fn layer_channels(&self, mat_idx: usize, layer: &str) -> Option<u32> {
+        let (start, _) = self.mat_layer_record(mat_idx, layer)?;
+        self.pod_at(start + 44)
+    }
+
+    /// A material layer's `uv_tiling` at rest; `(1, 1)` for an empty slot.
+    #[must_use]
+    pub fn layer_uv_tiling(&self, mat_idx: usize, layer: &str) -> (f32, f32) {
+        self.mat_layer_ref(mat_idx, layer).map_or((1.0, 1.0), |r| self.read_layer_uv_tiling(&r))
+    }
+
+    /// Number of `STBM` splat-terrain-bake materials: what a map's scenery
+    /// projections — the shadow under a building — draw with.
+    #[must_use]
+    pub fn splat_bake_count(&self) -> usize {
+        self.find_tag(b"MBTS").map_or(0, |i| self.tags[i].repetitions as usize)
+    }
+
+    /// The diffuse bitmap of `STBM` record `idx` — `name | diff | norm | spec`,
+    /// each a reference, 48 bytes — or the empty string when it has none.
+    #[must_use]
+    pub fn splat_bake_texture_path(&self, idx: usize) -> String {
+        const RECORD: usize = 48;
+        const DIFF: usize = 12;
+        let Some(tag) = self.find_tag(b"MBTS").map(|i| &self.tags[i]) else { return String::new() };
+        if idx >= tag.repetitions as usize {
+            return String::new();
+        }
+        self.pod_at::<Reference>(tag.offset as usize + idx * RECORD + DIFF)
+            .and_then(|layer| self.read_layer_bitmap_ref(&layer))
+            .and_then(|bitmap| self.read_char(&bitmap).ok())
+            .unwrap_or("")
+            .to_owned()
     }
 
     /// A material layer's `uv_offset`: its default and animation id.

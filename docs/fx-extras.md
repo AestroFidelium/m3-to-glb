@@ -124,6 +124,8 @@ folded values.
   "flipbook": {"cols": 8, "rows": 8, "start": [1, 4], "end": [60, 63],
                "random_start": true},
   "texture": "#Texture0",
+  "uv": {"tiling": [1, 1], "cell": true},
+  "mask": {"texture": "#Texture1", "channel": "g", "tiling": [1, 2], "cell": false},
   "tint": [1, 1, 1, 1],
   "blend": "add",
   "space": "local",
@@ -158,6 +160,9 @@ only `kind`, `capacity`, `spawn`, `lifetime`, `speed`, `emit_type`, `shape`,
 | `tail` | Present for the stretched orientations. `mode` is `free` · `clamp` · `fix` |
 | `flipbook` | Sprite-sheet atlas. The frame starts somewhere in `start` and walks to somewhere in `end` over `lifespan_factor` of the life |
 | `blend` | `opaque` · `blend` · `add` · `multiply` |
+| `texture` | The picture: the material's diffuse bitmap, else its emissive one. Absent for a flat-colour material, which carries `tint` instead |
+| `uv` | Where `texture` is read: `tiling` (repetitions, at rest) and `cell` — `true` when the layer reads the emitter's flipbook cell (`uv_source` 6), `false` when it reads the whole quad. A layer that does not follow the flipbook samples the whole sheet across every particle |
+| `mask` | The material's alpha mask, when it is not simply the picture's own alpha: `texture`, the `channel` it is read from (`r` · `g` · `b` · `a`), and its own `tiling` and `cell`. It scales the opacity of everything the material draws — picture or `tint` — so a tiling picture is cut to a ring, or a flat colour to a spark. Never the picture itself |
 | `emissive` | The material's glow bitmap, `"#TextureN"`, when it is a different image from `texture` — drawn over the particle with `emissive_blend` |
 | `emissive_blend` | `add` · `blend` · `multiply` — present with `emissive` |
 | `space` | `local` (particles ride the emitter) or `world` (detached once spawned) |
@@ -183,14 +188,27 @@ value is zero.
 {"m3fx": {"kind": "decal", "projection": "ortho", "size": [9.5, 9.5, 3],
           "euler": [0, 0, 0], "alpha": [0, 1, 0],
           "envelope": {"attack": [0.33, 0.33], "hold": [20, 20], "decay": [1, 1]},
-          "texture": "#Texture3", "blend": "blend"}}
+          "texture": "#Texture3", "uv": {"tiling": [1.5, 1.5], "cell": false},
+          "mask": {"texture": "#Texture4", "channel": "g", "tiling": [1, 1], "cell": false},
+          "blend": "blend"}}
 ```
 
-A ground projection — a cast indicator, an AoE ring. `size` is the projection box
-in bone-local units, and the node carries the projection's offset as its own
-translation. Alpha runs an attack → hold → decay envelope rather than a lifetime;
-each stage is a `[min, max]` range in seconds. These map onto Bevy's decal
-support, not onto a particle system.
+A ground projection — a cast indicator, an AoE ring, the shadow under a building.
+`size` is the projection box in bone-local units, and the node carries the
+projection's offset as its own translation. Alpha runs an attack → hold → decay
+envelope rather than a lifetime; each stage is a `[min, max]` range in seconds.
+These map onto Bevy's decal support, not onto a particle system.
+
+The material fields are the particle's (`texture`, `uv`, `mask`, `tint`,
+`blend`). A spell's ring is typically a tiling picture cut to shape by its
+`mask`; drawn without it, the picture fills the whole box.
+
+| Field | Meaning |
+|---|---|
+| `persistent` | `true` when the projection never expires — the envelope does not apply and the decal holds `alpha[1]`. Read from `PROJ.flags` bit `0x4`, which m3studio leaves unnamed: it is set on every scenery projection in the shipped maps (whose envelopes are the unauthored 1 s defaults) and on no spell's. An assumed reading |
+
+Scenery projections draw with a splat-terrain-bake material (`STBM`): its
+diffuse is the `texture`, carrying its own alpha, and `blend` is `blend`.
 
 ## Limits
 
@@ -201,5 +219,8 @@ support, not onto a particle system.
   lifetime, radius and the size/rotation vec3s are).
 * `PARC` particle copies, `RIB_` ribbons, forces (`FOR_`) and warps (`WRP_`) are
   not exported.
+* A layer's `uv` carries its tiling and whether it follows the flipbook; other
+  coordinate sources (a planar projection along world Z, as some ground
+  projections' pictures use) are written as the projection's own coordinates.
 * Effect textures raise `UNUSED_OBJECT` at info severity in the glTF validator.
   That is accurate — nothing in the scene draws with them; the runtime does.
