@@ -99,7 +99,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-bolero
-      - run: cargo bolero test --profile fuzz ${{ matrix.target }} -T 120s
+      # The prebuilt cargo-bolero is a musl binary and defaults --target to its
+      # own triple; ASan cannot link against static musl libc.
+      - run: cargo bolero test --profile fuzz --target x86_64-unknown-linux-gnu ${{ matrix.target }} -T 120s
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
