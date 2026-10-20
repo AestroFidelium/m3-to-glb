@@ -324,70 +324,10 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
             transform::decode_skin(span, layout, region_lookup, &mut soa)?;
         }
 
-        // Normals.
-        if let Some(normal_off) = offsets.normal {
-            transform::decode_normals_simd(span, normal_off, &mut soa)?;
-        } else {
-            for _ in 0..count {
-                soa.normals_x.push(0.0);
-                soa.normals_y.push(1.0);
-                soa.normals_z.push(0.0);
-            }
-        }
+        decode_surface(span, offsets, region, &mut soa)?;
 
-        // Tangents (VEC4: xyz + sign w). The bitangent sign sits in the 4th
-        // byte of the *normal* block, not the tangent block — pass the normal
-        // offset through so `decode_tangents` can read it.
-        if let Some(tangent_off) = offsets.tangent {
-            transform::decode_tangents(span, tangent_off, offsets.normal, &mut soa)?;
-        } else {
-            for _ in 0..count {
-                soa.tangents_x.push(1.0);
-                soa.tangents_y.push(0.0);
-                soa.tangents_z.push(0.0);
-                soa.tangents_w.push(1.0);
-            }
-        }
-
-        // UVs — m3studio always uses uv0 if present in vertex_flags.
-        // Formula: `raw * uv_multiply / 32768 + uv_offset`, V flipped.
-        {
-            let uv_multiply = if region.uv_multiply == 0.0 { 16.0 } else { region.uv_multiply };
-            let uv_offset = region.uv_offset;
-
-            if let Some(uv_off) = offsets.uv0 {
-                transform::decode_uvs(span, uv_off, uv_multiply, uv_offset, &mut soa)?;
-            } else {
-                for _ in 0..count {
-                    soa.uvs_u.push(0.0);
-                    soa.uvs_v.push(0.0);
-                }
-            }
-        }
-
-        // Indices. For REGN v≤2 indices are absolute (relative to the vertex
-        // buffer); we subtract `first_vertex_index` to make them region-local
-        // (see m3studio io_m3_import.py:1066-1068).
-        //
-        // A triangle that reaches outside its region's vertices is dropped:
-        // glTF forbids out-of-range indices, and in a real file it can only
-        // mean corruption.
-        let fi = region.first_face_index as usize;
-        let ni = region.face_count as usize;
         let index_start = soa.indices.len();
-        if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
-            let base = u32::try_from(soa.base_vertex_for_region())
-                .map_err(|_| anyhow::anyhow!("mesh exceeds u32::MAX vertices"))?;
-            let abs_to_local: u32 = if regn_version <= 2 { region.first_vertex_index } else { 0 };
-            let local = |i: u16| {
-                u32::from(i).checked_sub(abs_to_local).filter(|&l| l < region.vertex_count)
-            };
-            for tri in faces.chunks_exact(3) {
-                if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
-                    soa.indices.extend([a + base, b + base, c + base]);
-                }
-            }
-        }
+        append_region_indices(indices, region, regn_version, &mut soa)?;
         let index_count = soa.indices.len() - index_start;
         soa.commit_region();
 
@@ -399,6 +339,77 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
     }
 
     Ok(soa)
+}
+
+/// Normals, tangents and UVs of one region, with neutral defaults for
+/// components the vertex layout lacks (every attribute array stays as long
+/// as the position array).
+fn decode_surface(span: transform::VertexSpan<'_>, offsets: &VertexOffsets, region: &Regn, soa: &mut MeshDataSoA) -> Result<()> {
+    let count = span.count;
+    if let Some(normal_off) = offsets.normal {
+        transform::decode_normals_simd(span, normal_off, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.normals_x.push(0.0);
+            soa.normals_y.push(1.0);
+            soa.normals_z.push(0.0);
+        }
+    }
+
+    // Tangents (VEC4: xyz + sign w). The bitangent sign sits in the 4th
+    // byte of the *normal* block, not the tangent block — pass the normal
+    // offset through so `decode_tangents` can read it.
+    if let Some(tangent_off) = offsets.tangent {
+        transform::decode_tangents(span, tangent_off, offsets.normal, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.tangents_x.push(1.0);
+            soa.tangents_y.push(0.0);
+            soa.tangents_z.push(0.0);
+            soa.tangents_w.push(1.0);
+        }
+    }
+
+    // UVs — m3studio always uses uv0 if present in vertex_flags.
+    // Formula: `raw * uv_multiply / 32768 + uv_offset`, V flipped.
+    let uv_multiply = if region.uv_multiply == 0.0 { 16.0 } else { region.uv_multiply };
+    if let Some(uv_off) = offsets.uv0 {
+        transform::decode_uvs(span, uv_off, uv_multiply, region.uv_offset, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.uvs_u.push(0.0);
+            soa.uvs_v.push(0.0);
+        }
+    }
+    Ok(())
+}
+
+/// Appends one region's triangles to `soa.indices`, rebased onto the
+/// region's first vertex in the merged buffer.
+fn append_region_indices(indices: &[u16], region: &Regn, regn_version: u32, soa: &mut MeshDataSoA) -> Result<()> {
+    // For REGN v≤2 indices are absolute (relative to the vertex
+    // buffer); we subtract `first_vertex_index` to make them region-local
+    // (see m3studio io_m3_import.py:1066-1068).
+    //
+    // A triangle that reaches outside its region's vertices is dropped:
+    // glTF forbids out-of-range indices, and in a real file it can only
+    // mean corruption.
+    let fi = region.first_face_index as usize;
+    let ni = region.face_count as usize;
+    if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
+        let base = u32::try_from(soa.base_vertex_for_region())
+            .map_err(|_| anyhow::anyhow!("mesh exceeds u32::MAX vertices"))?;
+        let abs_to_local: u32 = if regn_version <= 2 { region.first_vertex_index } else { 0 };
+        let local = |i: u16| {
+            u32::from(i).checked_sub(abs_to_local).filter(|&l| l < region.vertex_count)
+        };
+        for tri in faces.chunks_exact(3) {
+            if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
+                soa.indices.extend([a + base, b + base, c + base]);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
