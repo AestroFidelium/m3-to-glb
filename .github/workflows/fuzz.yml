@@ -38,7 +38,9 @@ jobs:
           path: tests/__fuzz__/*/corpus
           key: corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: corpus-${{ matrix.target }}-
-      - run: cargo bolero test --profile fuzz ${{ matrix.target }} -T ${{ inputs.minutes || '20' }}min
+      # The prebuilt cargo-bolero is a musl binary and defaults --target to its
+      # own triple; ASan cannot link against static musl libc.
+      - run: cargo bolero test --profile fuzz --target x86_64-unknown-linux-gnu ${{ matrix.target }} -T ${{ inputs.minutes || '20' }}min
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
