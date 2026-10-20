@@ -521,20 +521,17 @@ fn simulation_json(j: &mut Obj, p: &Par) {
             "local"
         },
     );
-    if p.flags & (F_SORT_DISTANCE | F_SORT_HEIGHT) != 0 {
-        j.string(
-            "sort",
-            if p.flags & F_SORT_HEIGHT != 0 {
-                "height"
-            } else {
-                "distance"
-            },
-        );
+    if p.flags & F_SORT_HEIGHT != 0 {
+        j.string("sort", "height");
+    } else if p.flags & F_SORT_DISTANCE != 0 {
+        j.string("sort", "distance");
     }
-    if p.flags & (F_COLLIDE_TERRAIN | F_COLLIDE_OBJECTS) != 0 {
+    let terrain = p.flags & F_COLLIDE_TERRAIN != 0;
+    let objects = p.flags & F_COLLIDE_OBJECTS != 0;
+    if terrain || objects {
         let mut s = Obj::new();
-        s.bool("terrain", p.flags & F_COLLIDE_TERRAIN != 0);
-        s.bool("objects", p.flags & F_COLLIDE_OBJECTS != 0);
+        s.bool("terrain", terrain);
+        s.bool("objects", objects);
         s.num("bounce", p.bounce);
         s.num("friction", p.friction);
         j.raw("collide", &s.finish());

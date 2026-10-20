@@ -97,16 +97,7 @@ impl TextureCache {
     /// Normalises the path, then queries by xxh3 of the stem.
     #[must_use]
     pub fn find(&self, m3_path: &str) -> Option<&PathBuf> {
-        let normalized = self.normalize_m3_path(m3_path);
-
-        // Use only the file stem (no extension).
-        let stem = Path::new(normalized.as_ref())
-            .file_stem()?
-            .to_str()?
-            .to_lowercase();
-
-        let hash = xxh3_64(stem.as_bytes());
-        self.map.get(&hash)
+        self.find_with_mime(m3_path).map(|(path, _)| path)
     }
 
     /// Number of indexed textures.

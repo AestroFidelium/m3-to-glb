@@ -33,34 +33,24 @@ pub(crate) fn string(s: &str) -> String {
 }
 
 /// A JSON number, never `NaN` / `Infinity` — neither is valid JSON, so a
-/// non-finite value is written as `0`. Integral values drop the fraction.
+/// non-finite value is written as `0`. `Display` already writes the shortest
+/// text that reads back as the same value, without an exponent and without a
+/// fraction on integral values.
 pub(crate) fn num(v: f32) -> String {
-    if !v.is_finite() {
-        return "0".to_owned();
+    if v.is_finite() {
+        v.to_string()
+    } else {
+        "0".to_owned()
     }
-    if v.fract() == 0.0 && v.abs() < 1e9 {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "integral and below 1e9: exact in i64"
-        )]
-        return format!("{}", v as i64);
-    }
-    format!("{v}")
 }
 
 /// [`num`] for the `f64` accessor bounds.
 pub(crate) fn num64(v: f64) -> String {
-    if !v.is_finite() {
-        return "0".to_owned();
+    if v.is_finite() {
+        v.to_string()
+    } else {
+        "0".to_owned()
     }
-    if v.fract() == 0.0 && v.abs() < 1e15 {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "integral and below 1e15: exact in i64"
-        )]
-        return format!("{}", v as i64);
-    }
-    format!("{v}")
 }
 
 /// A JSON array of numbers.
@@ -171,6 +161,32 @@ mod tests {
         assert_eq!(num64(2.0), "2");
         assert_eq!(num64(0.25), "0.25");
         assert_eq!(num64(1e300), format!("{}", 1e300));
+    }
+
+    #[test]
+    fn numbers_read_back_as_the_same_value() {
+        // Read back with `str::parse`, which rounds correctly: serde_json's
+        // default float parser may be off by an ulp, so it only checks syntax.
+        fn read<T: std::str::FromStr>(text: &str) -> T {
+            assert!(
+                serde_json::from_str::<serde_json::Value>(text).is_ok_and(|v| v.is_number()),
+                "not a JSON number: {text}"
+            );
+            text.parse()
+                .unwrap_or_else(|_| panic!("not a number: {text}"))
+        }
+        bolero::check!().with_type::<f32>().for_each(|&v| {
+            let expected = if v.is_finite() { v } else { 0.0 };
+            assert_eq!(read::<f32>(&num(v)).to_bits(), expected.to_bits(), "{v:?}");
+        });
+        bolero::check!().with_type::<f64>().for_each(|&v| {
+            let expected = if v.is_finite() { v } else { 0.0 };
+            assert_eq!(
+                read::<f64>(&num64(v)).to_bits(),
+                expected.to_bits(),
+                "{v:?}"
+            );
+        });
     }
 
     #[test]
