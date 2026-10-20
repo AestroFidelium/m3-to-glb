@@ -1,0 +1,11 @@
+[files]
+# `.gitignore` re-includes `.git/` (`!.git/`), so typos would read the object store.
+extend-exclude = [".git/"]
+
+[default.extend-words]
+# Level of detail (M3 `lod_reduce` / `lod_cut`), not a misspelt "load".
+lod = "lod"
+
+[default.extend-identifiers]
+# Spelt so in the M3 format description; a public field name, renaming it breaks the API.
+alpha_threshhold = "alpha_threshhold"

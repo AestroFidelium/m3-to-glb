@@ -20,14 +20,6 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Stable with the components we need.
-        rustStable = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [
-            "rust-src" # required by rust-analyzer
-            "llvm-tools-preview" # required by cargo-llvm-lines, cargo-show-asm
-          ];
-        };
-
         # Nightly — for cranelift, polonius, std::simd, optimize_attribute.
         rustNightly = pkgs.rust-bin.nightly.latest.default.override {
           extensions = [
@@ -105,7 +97,7 @@
 
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
-            rustNightly # swap for rustStable if nightly isn't needed
+            rustNightly
 
             # Linker — speeds up dev `cargo build` by 5-10x.
             pkgs.mold
@@ -120,6 +112,16 @@
             pkgs.cargo-watch # watcher for scripts and CI
             pkgs.bacon # smart watcher with a TUI
             pkgs.cargo-tarpaulin # code coverage (Linux only)
+            pkgs.cargo-llvm-cov # branch coverage (`tools/gate cov`)
+            pkgs.cargo-mutants # mutation testing (`tools/mutants_night.sh`)
+            pkgs.jq # tools/mutants_night.sh reads cargo-mutants' outcomes.json
+
+            # Everything `tools/gate all` runs beyond cargo itself.
+            pkgs.cargo-machete
+            pkgs.typos
+            pkgs.nixfmt
+            pkgs.statix
+            pkgs.deadnix
 
             # System profiling tools
             pkgs.linuxPackages.perf # perf stat, perf record
