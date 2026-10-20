@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The quality gate. Nothing is committed that fails it.
 #
-#   tools/gate quick   fmt + clippy + nextest                         (before every commit)
-#   tools/gate all     quick + library-only clippy + docs + doctests + machete + typos + nix lints
-#                      (before merging to main; mirrors .github/workflows/ci.yml)
+#   tools/gate quick   fmt + clippy + nextest                         (pre-commit hook runs this)
+#   tools/gate all     quick + library-only clippy + docs + doctests + deny + machete + typos
+#                      + nix lints
+#                      (before merging to main; a superset of .github/workflows/ci.yml)
 #   tools/gate cov     branch coverage report (cargo llvm-cov nextest --branch) → target/llvm-cov/html
 #
 # Runs inside the nix dev shell; re-enters it when called from outside (e.g. a git hook).
@@ -27,6 +28,7 @@ all() {
   step "clippy (lib, no default features)"; cargo clippy --lib --no-default-features --quiet -- -D warnings
   step "docs";     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features --quiet
   step "doctests"; cargo test --doc --all-features --quiet
+  step "deny";     cargo deny --log-level error check
   step "machete";  cargo machete
   step "typos";    typos
   step "nix";      nixfmt --check flake.nix && statix check . && deadnix --fail .

@@ -15,6 +15,7 @@
 !flake.lock
 !.cargo/
 !.github/
+!.githooks/
 
 # Fuzzer working corpora are large and regenerate on every run; crash
 # reproducers (`tests/__fuzz__/*/crashes/`) are kept as regression inputs.

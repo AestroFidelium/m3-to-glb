@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Conventional Commits, English, title <= 72 chars, no attribution trailers.
+set -euo pipefail
+msg_file="$1"
+title="$(head -n1 "$msg_file")"
+pattern='^(feat|fix|refactor|test|perf|docs|chore|build|ci|style|revert)(\([a-z0-9-]+\))?!?: .+'
+if ! [[ "$title" =~ $pattern ]]; then
+  echo "commit-msg: title must be a Conventional Commit, e.g. 'fix(m3): bound the LAYR record by its tag'" >&2
+  echo "            got: $title" >&2
+  exit 1
+fi
+if (( ${#title} > 72 )); then
+  echo "commit-msg: title is ${#title} chars, keep it <= 72" >&2
+  exit 1
+fi
+if grep -qiE '^(co-authored-by:|.*generated with claude)' "$msg_file"; then
+  echo "commit-msg: no Co-Authored-By / 'Generated with' lines in this repo" >&2
+  exit 1
+fi

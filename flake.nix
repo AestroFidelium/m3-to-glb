@@ -117,6 +117,7 @@
             pkgs.jq # tools/mutants_night.sh reads cargo-mutants' outcomes.json
 
             # Everything `tools/gate all` runs beyond cargo itself.
+            pkgs.cargo-deny
             pkgs.cargo-machete
             pkgs.typos
             pkgs.nixfmt
@@ -135,7 +136,11 @@
             pkgs.openssl.dev
           ];
 
+          # Versioned hooks in .githooks/: pre-commit runs `tools/gate quick`,
+          # commit-msg enforces Conventional Commits. Fix hooks there, never in .git/hooks.
           shellHook = ''
+            git config core.hooksPath .githooks 2>/dev/null || true
+
             # mold linker via clang
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${pkgs.clang}/bin/clang"
             export RUSTFLAGS="-C link-arg=-fuse-ld=${pkgs.mold}/bin/mold"

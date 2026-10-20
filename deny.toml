@@ -1,0 +1,35 @@
+# cargo deny check: advisories, licenses, duplicate / wildcard deps, sources.
+# Run by `tools/gate all`.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# The crate is GPL-2.0-only, so every dependency must offer a GPL-2.0-compatible
+# license. Apache-2.0 is deliberately missing: it is incompatible with GPLv2, and
+# dual-licensed crates pass through their MIT / BSD side instead.
+allow = [
+  "GPL-2.0-only",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "Zlib",
+  "BSL-1.0",
+  "Unlicense",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
