@@ -20,6 +20,10 @@
 //! └─────────────────────────────┘
 //! ```
 
+// The `#[repr(C)]` record layouts are aligned by hand into columns (name,
+// type) so each struct reads like the format table it mirrors; rustfmt would
+// collapse that alignment.
+#[rustfmt::skip]
 pub mod structures;
 pub mod reader;
 
