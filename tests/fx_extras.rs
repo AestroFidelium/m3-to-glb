@@ -12,12 +12,16 @@ use m3_to_glb::m3::structures::{Col, Lite, Par, Proj};
 
 fn particle(par: &Par) -> serde_json::Value {
     let item = FxItem {
-        name:       "PAR0_test".into(),
-        bone:       0,
+        name: "PAR0_test".into(),
+        bone: 0,
         matm_index: Some(0),
-        kind:       FxKind::Particle(Box::new(*par)),
+        kind: FxKind::Particle(Box::new(*par)),
     };
-    let mat = MaterialResolve { texture: Some(3), blend: "add", ..MaterialResolve::default() };
+    let mat = MaterialResolve {
+        texture: Some(3),
+        blend: "add",
+        ..MaterialResolve::default()
+    };
     let raw = item.extras_json(&mat, &FxCurves::default());
     serde_json::from_str::<serde_json::Value>(&raw)
         .unwrap_or_else(|e| panic!("not valid JSON: {e}\n{raw}"))
@@ -32,7 +36,12 @@ fn particle_extras_parse_and_carry_the_emitter() {
     par.emit_max = 128;
     par.uv_flipbook_cols = 4;
     par.uv_flipbook_rows = 4;
-    par.color_init.default = Col { b: 255, g: 128, r: 64, a: 255 };
+    par.color_init.default = Col {
+        b: 255,
+        g: 128,
+        r: 64,
+        a: 255,
+    };
     par.size.default.x = 0.5;
 
     let v = particle(&par);
@@ -47,7 +56,11 @@ fn particle_extras_parse_and_carry_the_emitter() {
     // COL is stored B,G,R,A — the first colour key must come back as R,G,B,A.
     let first = &fx["color"]["keys"][0][1];
     let chan = |i: usize| first[i].as_f64().expect("colour channel");
-    assert!((chan(0) - f64::from(64.0_f32 / 255.0)).abs() < 1e-6, "red: {}", chan(0));
+    assert!(
+        (chan(0) - f64::from(64.0_f32 / 255.0)).abs() < 1e-6,
+        "red: {}",
+        chan(0)
+    );
     assert!((chan(2) - 1.0).abs() < 1e-6, "blue: {}", chan(2));
 }
 
@@ -90,10 +103,10 @@ fn light_and_decal_extras_parse() {
     lite.intensity.default = 3.0;
     lite.attenuation_far.default = 8.0;
     let item = FxItem {
-        name:       "LITE0_test".into(),
-        bone:       0,
+        name: "LITE0_test".into(),
+        bone: 0,
         matm_index: None,
-        kind:       FxKind::Light(Box::new(lite)),
+        kind: FxKind::Light(Box::new(lite)),
     };
     let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
     let v: serde_json::Value = serde_json::from_str(&raw).expect("light JSON");
@@ -107,10 +120,10 @@ fn light_and_decal_extras_parse() {
     proj.box_offset_x_left.default = -2.0;
     proj.lifetime_attack = 0.25;
     let item = FxItem {
-        name:       "PROJ0_test".into(),
-        bone:       0,
+        name: "PROJ0_test".into(),
+        bone: 0,
         matm_index: Some(0),
-        kind:       FxKind::Decal(Box::new(proj)),
+        kind: FxKind::Decal(Box::new(proj)),
     };
     let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
     let v: serde_json::Value = serde_json::from_str(&raw).expect("decal JSON");
@@ -126,18 +139,29 @@ fn a_projection_that_never_expires_says_so() {
     // Scenery splats — the shadow under a building — carry the default 1 s
     // envelope and are drawn for as long as the map is: their flag `0x4`, set on
     // every scenery projection and on no spell's, marks them as lasting.
-    for (flags, lasting) in [(0x4, true), (0xc, true), (0xd, true), (0x8, false), (0x9, false), (0, false)] {
+    for (flags, lasting) in [
+        (0x4, true),
+        (0xc, true),
+        (0xd, true),
+        (0x8, false),
+        (0x9, false),
+        (0, false),
+    ] {
         let mut proj = Proj::zeroed();
         proj.flags = flags;
         let item = FxItem {
-            name:       "PROJ0_test".into(),
-            bone:       0,
+            name: "PROJ0_test".into(),
+            bone: 0,
             matm_index: Some(0),
-            kind:       FxKind::Decal(Box::new(proj)),
+            kind: FxKind::Decal(Box::new(proj)),
         };
         let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
         let v: serde_json::Value = serde_json::from_str(&raw).expect("decal JSON");
-        assert_eq!(v["m3fx"].get("persistent").is_some_and(|p| p == true), lasting, "flags {flags:#x}: {v}");
+        assert_eq!(
+            v["m3fx"].get("persistent").is_some_and(|p| p == true),
+            lasting,
+            "flags {flags:#x}: {v}"
+        );
     }
 }
 
@@ -146,12 +170,16 @@ fn effect_names_survive_a_json_string() {
     // Bone names come from the file; a quote in one would otherwise split the
     // JSON chunk in half.
     let item = FxItem {
-        name:       "PAR0_a\"b".into(),
-        bone:       0,
+        name: "PAR0_a\"b".into(),
+        bone: 0,
         matm_index: None,
-        kind:       FxKind::Particle(Box::new(Par::zeroed())),
+        kind: FxKind::Particle(Box::new(Par::zeroed())),
     };
-    let mat = MaterialResolve { blend: "blend", color: Some([1.0, 0.0, 0.0, 1.0]), ..MaterialResolve::default() };
+    let mat = MaterialResolve {
+        blend: "blend",
+        color: Some([1.0, 0.0, 0.0, 1.0]),
+        ..MaterialResolve::default()
+    };
     let raw = item.extras_json(&mat, &FxCurves::default());
     serde_json::from_str::<serde_json::Value>(&raw).expect("quoted name JSON");
 }
@@ -182,7 +210,19 @@ fn every_optional_particle_field_is_written() {
     par.trail_system = 0;
 
     let fx = particle(&par)["m3fx"].clone();
-    for key in ["shape", "angle", "spread", "gravity", "drag", "mass", "noise", "parent_velocity", "tail", "flipbook", "collide"] {
+    for key in [
+        "shape",
+        "angle",
+        "spread",
+        "gravity",
+        "drag",
+        "mass",
+        "noise",
+        "parent_velocity",
+        "tail",
+        "flipbook",
+        "collide",
+    ] {
         assert!(fx.get(key).is_some(), "missing {key}: {fx}");
     }
     assert_eq!(fx["space"], "world");
@@ -204,7 +244,12 @@ fn every_optional_particle_field_is_written() {
 #[test]
 fn point_light_omits_cone_and_near_range() {
     let lite = Lite::zeroed();
-    let item = FxItem { name: "LITE0".into(), bone: 0, matm_index: None, kind: FxKind::Light(Box::new(lite)) };
+    let item = FxItem {
+        name: "LITE0".into(),
+        bone: 0,
+        matm_index: None,
+        kind: FxKind::Light(Box::new(lite)),
+    };
     let raw = item.extras_json(&MaterialResolve::default(), &FxCurves::default());
     let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(v["m3fx"]["light"], "point");

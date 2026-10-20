@@ -77,7 +77,7 @@ pub enum Error {
     #[error("{}: {source}", path.display())]
     Io {
         /// File the operation was on.
-        path:   PathBuf,
+        path: PathBuf,
         /// Underlying OS error.
         #[source]
         source: std::io::Error,
@@ -92,7 +92,7 @@ pub enum Error {
     #[error("animation file #{index}: {source:#}")]
     Animation {
         /// Position of the file in the list given to [`Converter::animations`].
-        index:  usize,
+        index: usize,
         /// What was wrong with it.
         source: anyhow::Error,
     },
@@ -129,13 +129,13 @@ pub struct Glb {
 #[non_exhaustive]
 pub struct Stats {
     /// Mesh divisions converted (usually 1; 0 for an effect-only model).
-    pub meshes:     usize,
+    pub meshes: usize,
     /// Triangles across all meshes.
-    pub triangles:  usize,
+    pub triangles: usize,
     /// Bones in the skeleton.
-    pub bones:      usize,
+    pub bones: usize,
     /// Textures embedded in the GLB.
-    pub textures:   usize,
+    pub textures: usize,
     /// Animation clips the model and its companion files declare.
     pub animations: usize,
 }
@@ -148,14 +148,20 @@ pub struct Stats {
 #[must_use]
 pub struct Converter<'a> {
     animations: Vec<&'a [u8]>,
-    textures:   Option<&'a TextureCache>,
-    options:    PackOptions,
+    textures: Option<&'a TextureCache>,
+    options: PackOptions,
 }
 
 impl<'a> Converter<'a> {
     /// A converter with the default options.
     pub fn new() -> Self {
-        Self { options: PackOptions { fx: true, ..PackOptions::default() }, ..Self::default() }
+        Self {
+            options: PackOptions {
+                fx: true,
+                ..PackOptions::default()
+            },
+            ..Self::default()
+        }
     }
 
     /// Add a companion `.m3a` animation file. Heroes of the Storm ships most
@@ -230,10 +236,13 @@ impl<'a> Converter<'a> {
             .map(|f| f.sequence_collections().map_or(0, |s| s.len()))
             .sum();
         let stats = Stats {
-            meshes:    meshes.len(),
-            triangles: meshes.iter().map(processor::MeshDataSoA::triangle_count).sum(),
-            bones:     m3.bone_count(),
-            textures:  embedded,
+            meshes: meshes.len(),
+            triangles: meshes
+                .iter()
+                .map(processor::MeshDataSoA::triangle_count)
+                .sum(),
+            bones: m3.bone_count(),
+            textures: embedded,
             animations,
         };
         Ok(Glb { bytes, stats })

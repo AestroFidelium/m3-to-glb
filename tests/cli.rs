@@ -12,7 +12,12 @@ fn bin() -> Command {
 }
 
 fn run(args: &[&str], cwd: &Path) -> Output {
-    bin().args(args).current_dir(cwd).env_remove("RUST_LOG").output().expect("spawn m3-to-glb")
+    bin()
+        .args(args)
+        .current_dir(cwd)
+        .env_remove("RUST_LOG")
+        .output()
+        .expect("spawn m3-to-glb")
 }
 
 fn text(b: &[u8]) -> String {
@@ -50,7 +55,10 @@ fn converts_next_to_the_input_by_default() {
     let out = run(&["quad.m3"], tmp.path());
     assert!(out.status.success(), "{}", text(&out.stderr));
     let stdout = text(&out.stdout);
-    assert!(stdout.contains("quad.glb") && stdout.contains("1 mesh"), "{stdout}");
+    assert!(
+        stdout.contains("quad.glb") && stdout.contains("1 mesh"),
+        "{stdout}"
+    );
     check_glb(&std::fs::read(tmp.path().join("quad.glb")).unwrap()).unwrap();
 }
 
@@ -58,7 +66,9 @@ fn converts_next_to_the_input_by_default() {
 fn picks_up_textures_beside_the_model() {
     let tmp = tempfile::tempdir().unwrap();
     write_quad(tmp.path(), "quad.m3");
-    image::RgbaImage::new(2, 2).save(tmp.path().join("quad_diff.png")).unwrap();
+    image::RgbaImage::new(2, 2)
+        .save(tmp.path().join("quad_diff.png"))
+        .unwrap();
     let out = run(&["quad.m3", "-o", "out.glb", "-v", "info"], tmp.path());
     assert!(out.status.success(), "{}", text(&out.stderr));
     assert!(text(&out.stderr).contains("using model directory"));
@@ -72,16 +82,33 @@ fn every_flag_together() {
     write_quad(tmp.path(), "quad.m3");
     std::fs::write(tmp.path().join("anims.m3a"), ModelSpec::default().build()).unwrap();
     std::fs::create_dir(tmp.path().join("tex")).unwrap();
-    image::RgbaImage::new(4, 4).save(tmp.path().join("tex").join("quad_diff.png")).unwrap();
+    image::RgbaImage::new(4, 4)
+        .save(tmp.path().join("tex").join("quad_diff.png"))
+        .unwrap();
     let out = run(
         &[
-            "quad.m3", "-o", "q.glb", "-t", "tex", "-a", "anims.m3a", "--no-fx", "--ktx2", "--bevy-compat",
-            "--max-tex-size", "2", "-q",
+            "quad.m3",
+            "-o",
+            "q.glb",
+            "-t",
+            "tex",
+            "-a",
+            "anims.m3a",
+            "--no-fx",
+            "--ktx2",
+            "--bevy-compat",
+            "--max-tex-size",
+            "2",
+            "-q",
         ],
         tmp.path(),
     );
     assert!(out.status.success(), "{}", text(&out.stderr));
-    assert!(out.stdout.is_empty(), "-q must print nothing: {}", text(&out.stdout));
+    assert!(
+        out.stdout.is_empty(),
+        "-q must print nothing: {}",
+        text(&out.stdout)
+    );
     assert!(tmp.path().join("q.glb").exists());
 }
 
@@ -99,8 +126,15 @@ fn failures_exit_non_zero_with_a_message() {
         write_quad(tmp.path(), "quad.m3");
         let out = run(args, tmp.path());
         assert_eq!(out.status.code(), Some(1), "{args:?}");
-        assert!(text(&out.stderr).contains("error"), "{args:?}: {}", text(&out.stderr));
+        assert!(
+            text(&out.stderr).contains("error"),
+            "{args:?}: {}",
+            text(&out.stderr)
+        );
     }
     // --bevy-compat without --ktx2 is a usage error (clap exits 2).
-    assert_eq!(run(&["quad.m3", "--bevy-compat"], tmp.path()).status.code(), Some(2));
+    assert_eq!(
+        run(&["quad.m3", "--bevy-compat"], tmp.path()).status.code(),
+        Some(2)
+    );
 }

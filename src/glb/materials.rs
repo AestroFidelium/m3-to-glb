@@ -22,17 +22,17 @@ const UV_SOURCE_FLIPBOOK: u32 = 6;
 
 /// Material context: the model's material tables plus where textures go.
 pub(super) struct Materials<'a, 'm> {
-    m3:         &'a M3File<'m>,
-    matms:      Vec<Matm>,
-    mat_count:  usize,
+    m3: &'a M3File<'m>,
+    matms: Vec<Matm>,
+    mat_count: usize,
     madd_count: usize,
     /// Every sequence's animated tracks — where a layer's scroll is read from.
-    curves:     crate::fx::curves::FxCurves,
+    curves: crate::fx::curves::FxCurves,
 }
 
 /// The glTF materials that were emitted and how MATM indices map onto them.
 pub(super) struct MaterialTable {
-    pub json:  Vec<GltfMaterial>,
+    pub json: Vec<GltfMaterial>,
     /// `remap[matm_index]` → glTF material index.
     pub remap: Vec<Option<usize>>,
 }
@@ -48,19 +48,42 @@ impl<'a, 'm> Materials<'a, 'm> {
     pub fn new(m3: &'a M3File<'m>) -> Self {
         let matms = m3.material_references().unwrap_or_default();
         let (mat_count, madd_count) = (m3.material_count(), m3.madd_count());
-        debug!("M3 materials: MAT_={}, MADD={}, MATM={}", mat_count, madd_count, matms.len());
+        debug!(
+            "M3 materials: MAT_={}, MADD={}, MATM={}",
+            mat_count,
+            madd_count,
+            matms.len()
+        );
         let curves = crate::fx::curves::FxCurves::build(m3);
-        Self { m3, matms, mat_count, madd_count, curves }
+        Self {
+            m3,
+            matms,
+            mat_count,
+            madd_count,
+            curves,
+        }
     }
 
     /// Emit a glTF material for every MATM entry some region actually uses —
     /// an unreferenced material trips the validator's `UNUSED_OBJECT`.
-    pub fn for_meshes(&self, meshes: &[MeshDataSoA], bufs: &mut Buffers, images: &mut Images<'_>) -> MaterialTable {
+    pub fn for_meshes(
+        &self,
+        meshes: &[MeshDataSoA],
+        bufs: &mut Buffers,
+        images: &mut Images<'_>,
+    ) -> MaterialTable {
         let used: ahash::AHashSet<usize> = meshes
             .iter()
-            .flat_map(|m| m.region_primitives.iter().filter_map(|rp| rp.material_index))
+            .flat_map(|m| {
+                m.region_primitives
+                    .iter()
+                    .filter_map(|rp| rp.material_index)
+            })
             .collect();
-        let mut table = MaterialTable { json: Vec::new(), remap: vec![None; self.matms.len()] };
+        let mut table = MaterialTable {
+            json: Vec::new(),
+            remap: vec![None; self.matms.len()],
+        };
         for (matm_idx, matm) in self.matms.iter().enumerate() {
             if !used.contains(&matm_idx) {
                 continue;
@@ -70,7 +93,10 @@ impl<'a, 'm> Materials<'a, 'm> {
                 MAT_STANDARD if mat_idx < self.mat_count => self.standard(mat_idx, bufs, images),
                 MAT_MADD if mat_idx < self.madd_count => self.madd(mat_idx, bufs, images),
                 t => {
-                    debug!("matm[{}] mat_type={} mat_idx={} — unsupported, skipping", matm_idx, t, mat_idx);
+                    debug!(
+                        "matm[{}] mat_type={} mat_idx={} — unsupported, skipping",
+                        matm_idx, t, mat_idx
+                    );
                     continue;
                 }
             };
@@ -81,10 +107,16 @@ impl<'a, 'm> Materials<'a, 'm> {
     }
 
     /// A `MAT_` material: explicit diffuse / normal / emissive / AO layers.
-    fn standard(&self, mat_idx: usize, bufs: &mut Buffers, images: &mut Images<'_>) -> GltfMaterial {
+    fn standard(
+        &self,
+        mat_idx: usize,
+        bufs: &mut Buffers,
+        images: &mut Images<'_>,
+    ) -> GltfMaterial {
         let m3 = self.m3;
         let diff_path = m3.texture_path_for_layer(mat_idx, "diff");
-        let mut load = |layer: &str, role| images.load(bufs, &m3.texture_path_for_layer(mat_idx, layer), role);
+        let mut load =
+            |layer: &str, role| images.load(bufs, &m3.texture_path_for_layer(mat_idx, layer), role);
         let base_color_texture = load("diff", TextureRole::Color);
         let normal_texture = load("norm", TextureRole::NormalMap);
         let emissive_texture = load("emis1", TextureRole::Color);
@@ -93,7 +125,10 @@ impl<'a, 'm> Materials<'a, 'm> {
         let blend_mode = m3.mat_blend_mode(mat_idx);
         let alpha_threshold = m3.mat_alpha_threshold(mat_idx);
         let flags = m3.mat_flags(mat_idx);
-        debug!("MAT_[{}] blend_mode={} alpha_threshold={} flags=0x{:08X}", mat_idx, blend_mode, alpha_threshold, flags);
+        debug!(
+            "MAT_[{}] blend_mode={} alpha_threshold={} flags=0x{:08X}",
+            mat_idx, blend_mode, alpha_threshold, flags
+        );
 
         let (alpha_mode, alpha_cutoff) = if blend_mode != 0 {
             (Some("BLEND"), 0.5)
@@ -113,7 +148,9 @@ impl<'a, 'm> Materials<'a, 'm> {
         let emissive_factor = if emissive_texture.is_some() {
             [emis_scale; 3]
         } else {
-            m3.layer_color(mat_idx, "emis1").map_or([0.0; 3], |c| [c[0] * emis_scale, c[1] * emis_scale, c[2] * emis_scale])
+            m3.layer_color(mat_idx, "emis1").map_or([0.0; 3], |c| {
+                [c[0] * emis_scale, c[1] * emis_scale, c[2] * emis_scale]
+            })
         };
         // A diffuse bitmap modulates white; a diffuse colour layer supplies the
         // colour; a material with neither has no albedo source — black, not
@@ -121,7 +158,8 @@ impl<'a, 'm> Materials<'a, 'm> {
         let mut base_color_factor = if base_color_texture.is_some() || !diff_path.is_empty() {
             [1.0; 4]
         } else {
-            m3.layer_color(mat_idx, "diff").unwrap_or([0.0, 0.0, 0.0, 1.0])
+            m3.layer_color(mat_idx, "diff")
+                .unwrap_or([0.0, 0.0, 0.0, 1.0])
         };
         // A see-through layer's output scale is how much of it shows: an additive
         // sheet authored at zero (a glow that only plays in some animation) adds
@@ -154,7 +192,11 @@ impl<'a, 'm> Materials<'a, 'm> {
     /// drawn. A slot with no record reads as fully on.
     fn layer_scale(&self, mat_idx: usize, layer: &str) -> f32 {
         use crate::m3::reader::LayerFloat;
-        let get = |f| self.m3.layer_float(mat_idx, layer, f).map_or(1.0, |(v, _)| v);
+        let get = |f| {
+            self.m3
+                .layer_float(mat_idx, layer, f)
+                .map_or(1.0, |(v, _)| v)
+        };
         get(LayerFloat::Multiply) * get(LayerFloat::Brightness)
     }
 
@@ -173,7 +215,10 @@ impl<'a, 'm> Materials<'a, 'm> {
         if span <= 1e-6 {
             return None;
         }
-        let rate = [(last.1[0] - first.1[0]) / span, (last.1[1] - first.1[1]) / span];
+        let rate = [
+            (last.1[0] - first.1[0]) / span,
+            (last.1[1] - first.1[1]) / span,
+        ];
         (rate.iter().any(|r| r.abs() > 1e-6) && rate.iter().all(|r| r.is_finite())).then_some(rate)
     }
 
@@ -190,7 +235,9 @@ impl<'a, 'm> Materials<'a, 'm> {
         // moves speaks for it — the colour's own, else the glow's, else a mask's
         // (flowing water is often a still colour under a drifting alpha).
         let scroll = mat_idx.and_then(|i| {
-            ["diff", "emis1", "alpha1", "alpha2", "spec", "emis2"].iter().find_map(|l| self.uv_scroll(i, l))
+            ["diff", "emis1", "alpha1", "alpha2", "spec", "emis2"]
+                .iter()
+                .find_map(|l| self.uv_scroll(i, l))
         });
         if blend.is_none() && scroll.is_none() {
             return None;
@@ -200,7 +247,11 @@ impl<'a, 'm> Materials<'a, 'm> {
             parts.push(format!(r#""blend":{}"#, crate::json::string(b)));
         }
         if let Some([u, v]) = scroll {
-            parts.push(format!(r#""uv_scroll":[{},{}]"#, crate::json::num(u), crate::json::num(v)));
+            parts.push(format!(
+                r#""uv_scroll":[{},{}]"#,
+                crate::json::num(u),
+                crate::json::num(v)
+            ));
         }
         Some(format!("{{{}}}", parts.join(",")))
     }
@@ -211,7 +262,9 @@ impl<'a, 'm> Materials<'a, 'm> {
         debug!("MADD[{}]: {} texture(s)", mat_idx, paths.len());
         let mut slots: [Option<usize>; 4] = [None; 4];
         for p in &paths {
-            let Some(slot) = MaddSlot::from_filename(p) else { continue };
+            let Some(slot) = MaddSlot::from_filename(p) else {
+                continue;
+            };
             // The first texture for a slot wins.
             if slots[slot as usize].is_none() {
                 slots[slot as usize] = images.load(bufs, p, slot.role());
@@ -261,9 +314,17 @@ impl<'a, 'm> Materials<'a, 'm> {
             if out.contains_key(&requested) {
                 continue;
             }
-            let matm_idx = resolved.get(requested).copied().flatten().unwrap_or(requested);
+            let matm_idx = resolved
+                .get(requested)
+                .copied()
+                .flatten()
+                .unwrap_or(requested);
             let Some(matm) = self.matms.get(matm_idx) else {
-                debug!("effect references matm[{}] of {} — no material", matm_idx, self.matms.len());
+                debug!(
+                    "effect references matm[{}] of {} — no material",
+                    matm_idx,
+                    self.matms.len()
+                );
                 continue;
             };
             out.insert(requested, self.effect_material(*matm, bufs, images));
@@ -271,7 +332,12 @@ impl<'a, 'm> Materials<'a, 'm> {
         out
     }
 
-    fn effect_material(&self, matm: Matm, bufs: &mut Buffers, images: &mut Images<'_>) -> fx::MaterialResolve {
+    fn effect_material(
+        &self,
+        matm: Matm,
+        bufs: &mut Buffers,
+        images: &mut Images<'_>,
+    ) -> fx::MaterialResolve {
         let m3 = self.m3;
         let mat_idx = matm.material_index as usize;
         let mut resolve = fx::MaterialResolve::default();
@@ -283,7 +349,8 @@ impl<'a, 'm> Materials<'a, 'm> {
                 // the picture is cut to (the mask, below).
                 let picture = ["diff", "emis1", "emis2"].into_iter().find_map(|layer| {
                     let path = m3.texture_path_for_layer(mat_idx, layer);
-                    let texture = (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color))??;
+                    let texture = (!path.is_empty())
+                        .then(|| images.load(bufs, &path, TextureRole::Color))??;
                     Some((layer, texture))
                 });
                 resolve.texture = picture.map(|(_, texture)| texture);
@@ -298,21 +365,26 @@ impl<'a, 'm> Materials<'a, 'm> {
                         resolve.emissive = glow;
                         // A version that does not say is read as additive, which
                         // is what nearly every effect material declares.
-                        resolve.emissive_blend =
-                            m3.mat_emis1_blend_mode(mat_idx).map_or("add", emissive_blend_name);
+                        resolve.emissive_blend = m3
+                            .mat_emis1_blend_mode(mat_idx)
+                            .map_or("add", emissive_blend_name);
                     }
                 }
                 // A textureless effect material carries its colour in the layer.
                 if resolve.texture.is_none() {
-                    resolve.color = m3.layer_color(mat_idx, "diff").or_else(|| m3.layer_color(mat_idx, "emis1"));
+                    resolve.color = m3
+                        .layer_color(mat_idx, "diff")
+                        .or_else(|| m3.layer_color(mat_idx, "emis1"));
                 }
                 // The alpha layer naming the picture's own bitmap by its alpha is no
                 // mask: the picture is drawn with its alpha instead.
                 let alpha_layer = self.alpha_layer(mat_idx, bufs, images);
-                let own_alpha = alpha_layer
-                    .is_some_and(|mask| Some(mask.texture) == resolve.texture && mask.channel == "a");
-                let reads_alpha = picture
-                    .is_some_and(|(layer, _)| m3.layer_channels(mat_idx, layer) == Some(CHANNELS_ARGB));
+                let own_alpha = alpha_layer.is_some_and(|mask| {
+                    Some(mask.texture) == resolve.texture && mask.channel == "a"
+                });
+                let reads_alpha = picture.is_some_and(|(layer, _)| {
+                    m3.layer_channels(mat_idx, layer) == Some(CHANNELS_ARGB)
+                });
                 resolve.texture_alpha = resolve.texture.is_some() && (own_alpha || reads_alpha);
                 resolve.mask = alpha_layer.filter(|_| !own_alpha);
                 resolve.blend = blend_name(m3.mat_blend_mode(mat_idx));
@@ -321,18 +393,29 @@ impl<'a, 'm> Materials<'a, 'm> {
                 // Diffuse, normal and specular, drawn over the ground; no blend
                 // of its own, and the diffuse carries its own alpha.
                 let path = m3.splat_bake_texture_path(mat_idx);
-                resolve.texture = (!path.is_empty()).then(|| images.load(bufs, &path, TextureRole::Color)).flatten();
-                resolve.uv = resolve.texture.map(|_| fx::LayerUv { tiling: [1.0, 1.0], cell: false });
+                resolve.texture = (!path.is_empty())
+                    .then(|| images.load(bufs, &path, TextureRole::Color))
+                    .flatten();
+                resolve.uv = resolve.texture.map(|_| fx::LayerUv {
+                    tiling: [1.0, 1.0],
+                    cell: false,
+                });
                 resolve.texture_alpha = resolve.texture.is_some();
                 resolve.blend = "blend";
             }
             MAT_MADD if mat_idx < self.madd_count => {
                 let paths = m3.madd_texture_paths(mat_idx).unwrap_or_default();
-                if let Some(diff) = paths.iter().find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Diff)) {
+                if let Some(diff) = paths
+                    .iter()
+                    .find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Diff))
+                {
                     resolve.texture = images.load(bufs, diff, TextureRole::Color);
                 }
                 // MADD names its glow by suffix and stores no blend for it: additive.
-                if let Some(emis) = paths.iter().find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Emis)) {
+                if let Some(emis) = paths
+                    .iter()
+                    .find(|p| MaddSlot::from_filename(p) == Some(MaddSlot::Emis))
+                {
                     let glow = images.load(bufs, emis, TextureRole::Color);
                     if glow != resolve.texture {
                         resolve.emissive = glow;
@@ -350,19 +433,35 @@ impl<'a, 'm> Materials<'a, 'm> {
     fn layer_uv(&self, mat_idx: usize, layer: &str) -> fx::LayerUv {
         let (x, y) = self.m3.layer_uv_tiling(mat_idx, layer);
         let cell = self.m3.layer_uv_source(mat_idx, layer) == Some(UV_SOURCE_FLIPBOOK);
-        fx::LayerUv { tiling: [x, y], cell }
+        fx::LayerUv {
+            tiling: [x, y],
+            cell,
+        }
     }
 
     /// The alpha layer of `MAT_` record `mat_idx` as a mask, when it carries a
     /// bitmap.
-    fn alpha_layer(&self, mat_idx: usize, bufs: &mut Buffers, images: &mut Images<'_>) -> Option<fx::MaskResolve> {
+    fn alpha_layer(
+        &self,
+        mat_idx: usize,
+        bufs: &mut Buffers,
+        images: &mut Images<'_>,
+    ) -> Option<fx::MaskResolve> {
         let path = self.m3.texture_path_for_layer(mat_idx, "alpha1");
         if path.is_empty() {
             return None;
         }
         let texture = images.load(bufs, &path, TextureRole::Color)?;
-        let channel = mask_channel(self.m3.layer_channels(mat_idx, "alpha1").unwrap_or(MASK_ALPHA));
-        Some(fx::MaskResolve { texture, channel, uv: self.layer_uv(mat_idx, "alpha1") })
+        let channel = mask_channel(
+            self.m3
+                .layer_channels(mat_idx, "alpha1")
+                .unwrap_or(MASK_ALPHA),
+        );
+        Some(fx::MaskResolve {
+            texture,
+            channel,
+            uv: self.layer_uv(mat_idx, "alpha1"),
+        })
     }
 }
 
@@ -390,8 +489,8 @@ fn mask_channel(channels: u32) -> &'static str {
 /// glTF validator's `UNUSED_MESH_TANGENT` / `UNUSED_OBJECT` notices.
 pub(super) fn prim_attr_accessors(
     material_idx: Option<usize>,
-    materials:    &[GltfMaterial],
-    tangent_acc:  usize,
+    materials: &[GltfMaterial],
+    tangent_acc: usize,
     texcoord_acc: usize,
 ) -> (Option<usize>, Option<usize>) {
     let mat = material_idx.and_then(|mi| materials.get(mi));
@@ -402,7 +501,10 @@ pub(super) fn prim_attr_accessors(
             || m.emissive_texture.is_some()
             || m.occlusion_texture.is_some()
     });
-    (has_normal.then_some(tangent_acc), has_any_texture.then_some(texcoord_acc))
+    (
+        has_normal.then_some(tangent_acc),
+        has_any_texture.then_some(texcoord_acc),
+    )
 }
 
 /// M3 `MAT_.blend_mode` → the blend name written into an effect's `extras`.
@@ -451,7 +553,10 @@ impl MaddSlot {
             Some(Self::Diff)
         } else if stem.ends_with("_norm") {
             Some(Self::Norm)
-        } else if ["_emis", "_emis1", "_emis2"].iter().any(|s| stem.ends_with(s)) {
+        } else if ["_emis", "_emis1", "_emis2"]
+            .iter()
+            .any(|s| stem.ends_with(s))
+        {
             Some(Self::Emis)
         } else if stem.ends_with("_ao") {
             Some(Self::Ao)
@@ -475,26 +580,29 @@ mod tests {
 
     fn mat(base: Option<usize>, normal: Option<usize>) -> GltfMaterial {
         GltfMaterial {
-            name:               "m".into(),
+            name: "m".into(),
             base_color_texture: base,
-            base_color_factor:  [1.0; 4],
-            normal_texture:     normal,
-            emissive_texture:   None,
-            occlusion_texture:  None,
-            metallic_factor:    0.0,
-            roughness_factor:   1.0,
-            emissive_factor:    [0.0; 3],
-            alpha_mode:         None,
-            alpha_cutoff:       0.5,
-            double_sided:       false,
-            m3_extras:          None,
+            base_color_factor: [1.0; 4],
+            normal_texture: normal,
+            emissive_texture: None,
+            occlusion_texture: None,
+            metallic_factor: 0.0,
+            roughness_factor: 1.0,
+            emissive_factor: [0.0; 3],
+            alpha_mode: None,
+            alpha_cutoff: 0.5,
+            double_sided: false,
+            m3_extras: None,
         }
     }
 
     #[test]
     fn base_and_normal_keeps_both() {
         let mats = [mat(Some(0), Some(1))];
-        assert_eq!(prim_attr_accessors(Some(0), &mats, 7, 9), (Some(7), Some(9)));
+        assert_eq!(
+            prim_attr_accessors(Some(0), &mats, 7, 9),
+            (Some(7), Some(9))
+        );
     }
 
     #[test]
@@ -519,7 +627,10 @@ mod tests {
 
     #[test]
     fn madd_slots_by_suffix() {
-        assert_eq!(MaddSlot::from_filename("a/B_DIFF.dds"), Some(MaddSlot::Diff));
+        assert_eq!(
+            MaddSlot::from_filename("a/B_DIFF.dds"),
+            Some(MaddSlot::Diff)
+        );
         assert_eq!(MaddSlot::from_filename("b_emis2.dds"), Some(MaddSlot::Emis));
         assert_eq!(MaddSlot::from_filename("c_spec.dds"), None);
         assert_eq!(MaddSlot::from_filename(""), None);

@@ -24,15 +24,15 @@ pub const ARRAY_BUFFER: u32 = 34962;
 pub const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 
 pub struct Accessor {
-    pub buffer_view:    usize,
-    pub byte_offset:    usize,
+    pub buffer_view: usize,
+    pub byte_offset: usize,
     pub component_type: u32,
-    pub count:          usize,
+    pub count: usize,
     /// `"SCALAR"`, `"VEC2"`, `"VEC3"`, `"VEC4"` or `"MAT4"`.
-    pub element_type:   &'static str,
-    pub normalized:     bool,
-    pub min:            Option<Vec<f64>>,
-    pub max:            Option<Vec<f64>>,
+    pub element_type: &'static str,
+    pub normalized: bool,
+    pub min: Option<Vec<f64>>,
+    pub max: Option<Vec<f64>>,
 }
 
 pub struct BufferView {
@@ -43,81 +43,81 @@ pub struct BufferView {
 
 pub struct Primitive {
     pub position_accessor: usize,
-    pub normal_accessor:   usize,
+    pub normal_accessor: usize,
     // TANGENT is only emitted when the material has a normal texture, and
     // TEXCOORD_0 only when the material samples some texture — otherwise the
     // glTF validator flags them as UNUSED (tangent/object).
-    pub tangent_accessor:  Option<usize>,
+    pub tangent_accessor: Option<usize>,
     pub texcoord_accessor: Option<usize>,
-    pub indices_accessor:  usize,
-    pub material:          Option<usize>,
-    pub joints_accessor:   Option<usize>,
-    pub weights_accessor:  Option<usize>,
+    pub indices_accessor: usize,
+    pub material: Option<usize>,
+    pub joints_accessor: Option<usize>,
+    pub weights_accessor: Option<usize>,
 }
 
 pub struct GltfImage {
     pub buffer_view: usize,
-    pub mime_type:   String,
+    pub mime_type: String,
 }
 
 pub struct GltfMaterial {
-    pub name:               String,
+    pub name: String,
     pub base_color_texture: Option<usize>,
-    pub base_color_factor:  [f32; 4],
-    pub normal_texture:     Option<usize>,
-    pub emissive_texture:   Option<usize>,
-    pub occlusion_texture:  Option<usize>,
-    pub metallic_factor:    f32,
-    pub roughness_factor:   f32,
-    pub emissive_factor:    [f32; 3],
-    pub alpha_mode:         Option<&'static str>, // "MASK" or "BLEND"; None = OPAQUE
-    pub alpha_cutoff:       f32,
-    pub double_sided:       bool,
+    pub base_color_factor: [f32; 4],
+    pub normal_texture: Option<usize>,
+    pub emissive_texture: Option<usize>,
+    pub occlusion_texture: Option<usize>,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub emissive_factor: [f32; 3],
+    pub alpha_mode: Option<&'static str>, // "MASK" or "BLEND"; None = OPAQUE
+    pub alpha_cutoff: f32,
+    pub double_sided: bool,
     /// The `m3` object written into the material's `extras` (raw JSON), for
     /// what glTF has no field for: an additive blend, a scrolling texture.
-    pub m3_extras:          Option<String>,
+    pub m3_extras: Option<String>,
 }
 
 pub struct GltfMesh {
-    pub name:       String,
+    pub name: String,
     pub primitives: Vec<Primitive>,
 }
 
 /// glTF scene node — may be a bone, a mesh, or just a grouping node.
 #[derive(Default)]
 pub struct GltfNode {
-    pub name:        Option<String>,
+    pub name: Option<String>,
     pub translation: Option<[f32; 3]>,
-    pub rotation:    Option<[f32; 4]>, // xyzw
-    pub scale:       Option<[f32; 3]>,
-    pub mesh:        Option<usize>,
-    pub skin:        Option<usize>,
-    pub children:    Vec<usize>,
+    pub rotation: Option<[f32; 4]>, // xyzw
+    pub scale: Option<[f32; 3]>,
+    pub mesh: Option<usize>,
+    pub skin: Option<usize>,
+    pub children: Vec<usize>,
     /// Raw JSON object written verbatim as the node's `extras`. Effects ride
     /// here (see `crate::fx`); glTF treats `extras` as opaque application data,
     /// and Bevy surfaces it as a `GltfExtras` component on the node's entity.
-    pub extras:      Option<String>,
+    pub extras: Option<String>,
 }
 
 pub struct GltfSkin {
-    pub joints:                Vec<usize>,    // node indices
+    pub joints: Vec<usize>,                   // node indices
     pub inverse_bind_matrices: Option<usize>, // accessor index (MAT4)
 }
 
 pub struct GltfAnimSampler {
-    pub input:         usize, // accessor index for time
-    pub output:        usize, // accessor index for values
+    pub input: usize,                // accessor index for time
+    pub output: usize,               // accessor index for values
     pub interpolation: &'static str, // "LINEAR" or "STEP"
 }
 
 pub struct GltfAnimChannel {
-    pub sampler:     usize,
+    pub sampler: usize,
     pub target_node: usize,
-    pub path:        &'static str, // "translation"/"rotation"/"scale"
+    pub path: &'static str, // "translation"/"rotation"/"scale"
 }
 
 pub struct GltfAnimation {
-    pub name:     String,
+    pub name: String,
     pub samplers: Vec<GltfAnimSampler>,
     pub channels: Vec<GltfAnimChannel>,
 }
@@ -125,21 +125,21 @@ pub struct GltfAnimation {
 /// Everything the manifest describes.
 #[derive(Default)]
 pub struct Document<'a> {
-    pub meshes:       &'a [GltfMesh],
-    pub accessors:    &'a [Accessor],
+    pub meshes: &'a [GltfMesh],
+    pub accessors: &'a [Accessor],
     pub buffer_views: &'a [BufferView],
-    pub bin_length:   usize,
-    pub images:       &'a [GltfImage],
-    pub materials:    &'a [GltfMaterial],
-    pub nodes:        &'a [GltfNode],
-    pub skins:        &'a [GltfSkin],
-    pub scene_roots:  &'a [usize],
-    pub animations:   &'a [GltfAnimation],
+    pub bin_length: usize,
+    pub images: &'a [GltfImage],
+    pub materials: &'a [GltfMaterial],
+    pub nodes: &'a [GltfNode],
+    pub skins: &'a [GltfSkin],
+    pub scene_roots: &'a [usize],
+    pub animations: &'a [GltfAnimation],
     /// Wire KTX2 images through the standard `texture.source` field with
     /// `mimeType: "image/ktx2"` and do NOT declare `KHR_texture_basisu`. This is
     /// non-canonical glTF — only Bevy 0.17 accepts it (it dispatches images by
     /// MIME type via `bevy_image`, but only when the extension is absent).
-    pub bevy_compat:  bool,
+    pub bevy_compat: bool,
 }
 
 // ─── JSON builder ────────────────────────────────────────────────────────────
@@ -167,7 +167,13 @@ pub fn build_json(doc: &Document<'_>) -> String {
 }
 
 /// Comma-separated `items`, each written by `f`, inside `open` … `close`.
-fn list<T>(j: &mut String, open: &str, items: &[T], close: &str, mut f: impl FnMut(&mut String, &T)) {
+fn list<T>(
+    j: &mut String,
+    open: &str,
+    items: &[T],
+    close: &str,
+    mut f: impl FnMut(&mut String, &T),
+) {
     j.push_str(open);
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -198,9 +204,15 @@ fn write_extensions(j: &mut String, doc: &Document<'_>) {
 /// (Bevy's loader) rejects a scene object without one.
 fn write_scene(j: &mut String, roots: &[usize], nodes: &[GltfNode]) {
     if !roots.is_empty() {
-        list(j, r#""scene":0,"scenes":[{"nodes":["#, roots, "]}],", |j, r| {
-            let _ = write!(j, "{r}");
-        });
+        list(
+            j,
+            r#""scene":0,"scenes":[{"nodes":["#,
+            roots,
+            "]}],",
+            |j, r| {
+                let _ = write!(j, "{r}");
+            },
+        );
     }
     if !nodes.is_empty() {
         list(j, r#""nodes":["#, nodes, "],", write_node);
@@ -266,7 +278,11 @@ fn write_meshes(j: &mut String, meshes: &[GltfMesh]) {
 }
 
 fn write_primitive(j: &mut String, p: &Primitive) {
-    let _ = write!(j, r#"{{"attributes":{{"POSITION":{},"NORMAL":{}"#, p.position_accessor, p.normal_accessor);
+    let _ = write!(
+        j,
+        r#"{{"attributes":{{"POSITION":{},"NORMAL":{}"#,
+        p.position_accessor, p.normal_accessor
+    );
     let optional = [
         ("TANGENT", p.tangent_accessor),
         ("TEXCOORD_0", p.texcoord_accessor),
@@ -303,7 +319,10 @@ fn write_material(j: &mut String, mat: &GltfMaterial) {
     if let Some(tex) = mat.base_color_texture {
         let _ = write!(j, r#","baseColorTexture":{{"index":{tex}}}"#);
     }
-    #[expect(clippy::float_cmp, reason = "exact default: the factor is assigned, never computed")]
+    #[expect(
+        clippy::float_cmp,
+        reason = "exact default: the factor is assigned, never computed"
+    )]
     let custom_color = mat.base_color_factor != [1.0; 4];
     if custom_color {
         j.push_str(r#","baseColorFactor":"#);
@@ -348,7 +367,10 @@ fn write_textures(j: &mut String, images: &[GltfImage], bevy_compat: bool) {
     list(j, r#""textures":["#, &indexed, "],", |j, &(i, img)| {
         if img.mime_type == "image/ktx2" && !bevy_compat {
             // KHR_texture_basisu form: the `source` lives inside the extension.
-            let _ = write!(j, r#"{{"sampler":0,"extensions":{{"KHR_texture_basisu":{{"source":{i}}}}}}}"#);
+            let _ = write!(
+                j,
+                r#"{{"sampler":0,"extensions":{{"KHR_texture_basisu":{{"source":{i}}}}}}}"#
+            );
         } else {
             // PNG/JPEG, and the bevy_compat KTX2 path: the standard `source`;
             // Bevy picks the decoder from `image.mimeType`.
@@ -356,7 +378,12 @@ fn write_textures(j: &mut String, images: &[GltfImage], bevy_compat: bool) {
         }
     });
     list(j, r#""images":["#, images, "],", |j, img| {
-        let _ = write!(j, r#"{{"bufferView":{},"mimeType":{}}}"#, img.buffer_view, json::string(&img.mime_type));
+        let _ = write!(
+            j,
+            r#"{{"bufferView":{},"mimeType":{}}}"#,
+            img.buffer_view,
+            json::string(&img.mime_type)
+        );
     });
 }
 
@@ -367,10 +394,18 @@ fn write_animations(j: &mut String, animations: &[GltfAnimation]) {
     list(j, r#""animations":["#, animations, "],", |j, anim| {
         let open = format!(r#"{{"name":{},"samplers":["#, json::string(&anim.name));
         list(j, &open, &anim.samplers, "]", |j, s| {
-            let _ = write!(j, r#"{{"input":{},"output":{},"interpolation":"{}"}}"#, s.input, s.output, s.interpolation);
+            let _ = write!(
+                j,
+                r#"{{"input":{},"output":{},"interpolation":"{}"}}"#,
+                s.input, s.output, s.interpolation
+            );
         });
         list(j, r#","channels":["#, &anim.channels, "]}", |j, c| {
-            let _ = write!(j, r#"{{"sampler":{},"target":{{"node":{},"path":"{}"}}}}"#, c.sampler, c.target_node, c.path);
+            let _ = write!(
+                j,
+                r#"{{"sampler":{},"target":{{"node":{},"path":"{}"}}}}"#,
+                c.sampler, c.target_node, c.path
+            );
         });
     });
 }
@@ -393,7 +428,9 @@ fn write_accessors(j: &mut String, accessors: &[Accessor]) {
         }
         for (key, bound) in [("min", &acc.min), ("max", &acc.max)] {
             if let Some(vs) = bound {
-                list(j, &format!(r#","{key}":["#), vs, "]", |j, v| j.push_str(&json::num64(*v)));
+                list(j, &format!(r#","{key}":["#), vs, "]", |j, v| {
+                    j.push_str(&json::num64(*v));
+                });
             }
         }
         j.push('}');
@@ -405,7 +442,11 @@ fn write_accessors(j: &mut String, accessors: &[Accessor]) {
 fn write_buffers(j: &mut String, views: &[BufferView], bin_length: usize) {
     if !views.is_empty() {
         list(j, r#""bufferViews":["#, views, "],", |j, bv| {
-            let _ = write!(j, r#"{{"buffer":0,"byteOffset":{},"byteLength":{}"#, bv.offset, bv.length);
+            let _ = write!(
+                j,
+                r#"{{"buffer":0,"byteOffset":{},"byteLength":{}"#,
+                bv.offset, bv.length
+            );
             if let Some(target) = bv.target {
                 let _ = write!(j, r#","target":{target}"#);
             }
@@ -431,22 +472,45 @@ mod tests {
         // glTF forbids empty arrays, and a scene may only list nodes that exist.
         let v = parse(&Document::default());
         assert_eq!(v["asset"]["version"], "2.0");
-        for key in ["scene", "scenes", "nodes", "meshes", "accessors", "bufferViews", "buffers"] {
+        for key in [
+            "scene",
+            "scenes",
+            "nodes",
+            "meshes",
+            "accessors",
+            "bufferViews",
+            "buffers",
+        ] {
             assert!(v.get(key).is_none(), "{key} present: {v}");
         }
     }
 
     #[test]
     fn bevy_compat_omits_basisu_extension() {
-        let images = [GltfImage { buffer_view: 0, mime_type: "image/ktx2".into() }];
-        let views = [BufferView { offset: 0, length: 16, target: None }];
-        let doc = Document { images: &images, buffer_views: &views, bin_length: 16, ..Document::default() };
+        let images = [GltfImage {
+            buffer_view: 0,
+            mime_type: "image/ktx2".into(),
+        }];
+        let views = [BufferView {
+            offset: 0,
+            length: 16,
+            target: None,
+        }];
+        let doc = Document {
+            images: &images,
+            buffer_views: &views,
+            bin_length: 16,
+            ..Document::default()
+        };
 
         let canonical = build_json(&doc);
         assert!(canonical.contains(r#""extensionsRequired":["KHR_texture_basisu"]"#));
         assert!(canonical.contains(r#""KHR_texture_basisu":{"source":0}"#));
 
-        let bevy = build_json(&Document { bevy_compat: true, ..doc });
+        let bevy = build_json(&Document {
+            bevy_compat: true,
+            ..doc
+        });
         assert!(!bevy.contains("KHR_texture_basisu"));
         assert!(!bevy.contains("extensionsRequired"));
         assert!(bevy.contains(r#""sampler":0,"source":0"#));
@@ -468,7 +532,11 @@ mod tests {
             },
             GltfNode::default(),
         ];
-        let v = parse(&Document { nodes: &nodes, scene_roots: &[0], ..Document::default() });
+        let v = parse(&Document {
+            nodes: &nodes,
+            scene_roots: &[0],
+            ..Document::default()
+        });
         let n = &v["nodes"][0];
         assert_eq!(n["name"], "a\"b");
         assert_eq!(n["translation"][1], 0, "NaN is written as 0");

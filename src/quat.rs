@@ -93,7 +93,10 @@ mod tests {
     #[test]
     fn z_up_to_y_up_maps_z_to_y() {
         let v = rotate([0.0, 0.0, 1.0], Z_UP_TO_Y_UP);
-        assert!((v[1] - 1.0).abs() < 1e-6 && v[0].abs() < 1e-6 && v[2].abs() < 1e-6, "{v:?}");
+        assert!(
+            (v[1] - 1.0).abs() < 1e-6 && v[0].abs() < 1e-6 && v[2].abs() < 1e-6,
+            "{v:?}"
+        );
         // Composing with the identity changes nothing.
         assert_eq!(mul(Z_UP_TO_Y_UP, [0.0, 0.0, 0.0, 1.0]), Z_UP_TO_Y_UP);
     }
@@ -101,7 +104,11 @@ mod tests {
     #[test]
     fn normalize_unit_length() {
         let q = normalize([3.0, 0.0, 4.0, 0.0]);
-        assert!((len(q) - 1.0).abs() < 1e-6, "expected unit length, got {}", len(q));
+        assert!(
+            (len(q) - 1.0).abs() < 1e-6,
+            "expected unit length, got {}",
+            len(q)
+        );
     }
 
     #[test]
@@ -124,7 +131,12 @@ mod tests {
 
     #[test]
     fn clamp_preserves_already_unit() {
-        let q = normalize_and_clamp([0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2]);
+        let q = normalize_and_clamp([
+            0.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+        ]);
         assert!((len(q) - 1.0).abs() < 1e-5);
     }
 }

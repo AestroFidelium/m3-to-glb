@@ -13,7 +13,16 @@ cargo clippy --all-targets --all-features -- -D warnings   # CI gate: pedantic +
 cargo test --all-features                                  # unit + integration + bolero replay
 cargo bolero test --profile fuzz fuzz_whole_pipeline -T 5min   # real libFuzzer run
 M3_CORPUS=/mnt/Projects/StarCraftExtracted/out cargo test --release --test corpus -- --ignored
+
+cargo t                      # alias: cargo nextest run --all-features
+tools/gate [quick|all|cov]   # the gate: quick before a commit, all before merging to main
+tools/fuzz_night.sh 8h ['test(/regex/)'] [threads]   # fuzz campaign → crashes/LATEST.md
+tools/mutants_night.sh 8h ['src/m3/**,…'] [jobs]     # mutation run (resumable) → mutants/LATEST.md
 ```
+
+The night scripts write a report an agent works from; each report starts with
+"How to work this report". Keep threads / jobs at 1 (at most 2): more hangs
+this machine. Both re-enter `nix develop` when not already in the dev shell.
 
 Nightly (pinned in `rust-toolchain.toml`) is only for dev speed — cranelift +
 mold in `.cargo/config.toml`. The crate builds on stable ≥ `rust-version`.

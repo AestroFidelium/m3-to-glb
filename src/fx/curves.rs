@@ -115,7 +115,15 @@ impl FxCurves {
                 .map(|b| decode_int(m3, &b.frames, &b.keys, true))
                 .collect();
 
-            seqs.push(SeqCurves { name, lookup, real, vec3, vec2, int16, uint16 });
+            seqs.push(SeqCurves {
+                name,
+                lookup,
+                real,
+                vec3,
+                vec2,
+                int16,
+                uint16,
+            });
         }
         Self { seqs }
     }
@@ -220,7 +228,9 @@ pub fn peak_window(curves: &[(&str, &[(f32, f32)])]) -> Option<(f32, f32, f32)> 
         // how these curves are authored.
         let first = c.iter().position(|&(_, v)| v > 0.0);
         let last = c.iter().rposition(|&(_, v)| v > 0.0);
-        let (Some(first), Some(last)) = (first, last) else { continue };
+        let (Some(first), Some(last)) = (first, last) else {
+            continue;
+        };
         // A burst's last non-zero key is not the moment it stops — the following
         // zero key is. Extend to it when there is one.
         let end = c.get(last + 1).map_or(c[last].0, |&(t, _)| t);
@@ -296,21 +306,40 @@ fn decode_real(m3: &M3File<'_>, frames: &Reference, keys: &Reference) -> Vec<(f3
 }
 
 /// SDS6 / SDU6 keys, widened to float so counts share the float curve shape.
-fn decode_int(m3: &M3File<'_>, frames: &Reference, keys: &Reference, unsigned: bool) -> Vec<(f32, f32)> {
+fn decode_int(
+    m3: &M3File<'_>,
+    frames: &Reference,
+    keys: &Reference,
+    unsigned: bool,
+) -> Vec<(f32, f32)> {
     let f = m3.read_ref_i32(frames).unwrap_or_default();
     let v: Vec<f32> = if unsigned {
-        m3.read_ref_u16(keys).unwrap_or_default().into_iter().map(f32::from).collect()
+        m3.read_ref_u16(keys)
+            .unwrap_or_default()
+            .into_iter()
+            .map(f32::from)
+            .collect()
     } else {
-        m3.read_ref_i16(keys).unwrap_or_default().into_iter().map(f32::from).collect()
+        m3.read_ref_i16(keys)
+            .unwrap_or_default()
+            .into_iter()
+            .map(f32::from)
+            .collect()
     };
-    f.iter().zip(v.iter()).map(|(&ms, &val)| (ms as f32 / 1000.0, val)).collect()
+    f.iter()
+        .zip(v.iter())
+        .map(|(&ms, &val)| (ms as f32 / 1000.0, val))
+        .collect()
 }
 
 fn decode_vec2(m3: &M3File<'_>, frames: &Reference, keys: &Reference) -> Vec<(f32, [f32; 2])> {
     let f = m3.read_ref_i32(frames).unwrap_or_default();
     let v = m3.read_ref_vec2(keys).unwrap_or_default();
     let fin = |x: f32| if x.is_finite() { x } else { 0.0 };
-    f.iter().zip(v.iter()).map(|(&ms, p)| (ms as f32 / 1000.0, [fin(p.x), fin(p.y)])).collect()
+    f.iter()
+        .zip(v.iter())
+        .map(|(&ms, p)| (ms as f32 / 1000.0, [fin(p.x), fin(p.y)]))
+        .collect()
 }
 
 fn decode_vec3(m3: &M3File<'_>, frames: &Reference, keys: &Reference) -> Vec<(f32, [f32; 3])> {

@@ -6,7 +6,10 @@
 //! M3_CORPUS=/path/to/extracted cargo test --release --test corpus -- --ignored --nocapture
 //! ```
 
-#![allow(clippy::print_stderr, reason = "the corpus report is this test's output")]
+#![allow(
+    clippy::print_stderr,
+    reason = "the corpus report is this test's output"
+)]
 
 mod common;
 
@@ -14,7 +17,9 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -41,15 +46,19 @@ fn real_models_convert_to_valid_glb() {
     let results: Vec<(PathBuf, Result<(), String>)> = files
         .par_iter()
         .map(|p| {
-            let r = std::fs::read(p).map_err(|e| e.to_string()).and_then(|bytes| {
-                // Rejecting a file is allowed; emitting a broken one is not.
-                if let Ok(glb) = m3_to_glb::Converter::new().convert(&bytes) {
-                    common::check_glb(&glb.bytes).map(drop).map_err(|e| format!("INVALID: {e}"))
-                } else {
-                    rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Ok(())
-                }
-            });
+            let r = std::fs::read(p)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    // Rejecting a file is allowed; emitting a broken one is not.
+                    if let Ok(glb) = m3_to_glb::Converter::new().convert(&bytes) {
+                        common::check_glb(&glb.bytes)
+                            .map(drop)
+                            .map_err(|e| format!("INVALID: {e}"))
+                    } else {
+                        rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        Ok(())
+                    }
+                });
             (p.clone(), r)
         })
         .collect();

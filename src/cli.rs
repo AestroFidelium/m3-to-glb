@@ -16,7 +16,10 @@ pub fn cli_styles() -> Styles {
 }
 
 #[derive(Parser, Debug)]
-#[expect(clippy::struct_excessive_bools, reason = "one field per command-line flag")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one field per command-line flag"
+)]
 #[command(
     name    = "m3-to-glb",
     version,

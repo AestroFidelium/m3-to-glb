@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Installed by the flake (git config core.hooksPath .githooks). Fix it here, never in .git/hooks.
+exec "$(git rev-parse --show-toplevel)/tools/gate" quick

@@ -14,12 +14,12 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use bytemuck::{Pod, Zeroable};
+use m3_to_glb::m3::reader::M3File;
+use m3_to_glb::m3::reader::{LayerFloat, layr_uv_offset_offset};
 use m3_to_glb::m3::structures::{
     Atvl, Bat, Bone, Cms, Div, Lite, Matm, Par, Proj, Reference, Regn, Schr, Seqs, SeqsV1, Stc, Stg,
 };
-use m3_to_glb::m3::reader::{LayerFloat, layr_uv_offset_offset};
 use m3_to_glb::m3::{layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags};
-use m3_to_glb::m3::reader::M3File;
 use m3_to_glb::processor::VertexOffsets;
 
 /// A length or index as the `u32` the M3 format stores. Test fixtures stay far
@@ -31,24 +31,27 @@ pub fn len32(n: usize) -> u32 {
 // ─── Raw tag writer ──────────────────────────────────────────────────────────
 
 struct Tag {
-    name:    [u8; 4],
+    name: [u8; 4],
     version: u32,
-    data:    Vec<u8>,
-    reps:    u32,
+    data: Vec<u8>,
+    reps: u32,
 }
 
 /// Lays out tags the way an M3 file does: a 12-byte header, each payload
 /// 16-byte aligned, and the tag index at the end.
 pub struct M3Writer {
     magic: [u8; 4],
-    tags:  Vec<Tag>,
+    tags: Vec<Tag>,
 }
 
 impl M3Writer {
     pub fn new(magic: [u8; 4]) -> Self {
         // Tag 0 is the header tag itself in real files; a reference with
         // `index == 0` therefore never points at useful data.
-        let mut w = Self { magic, tags: Vec::new() };
+        let mut w = Self {
+            magic,
+            tags: Vec::new(),
+        };
         w.raw("MD34", 11, vec![0; 24], 1);
         w
     }
@@ -58,7 +61,12 @@ impl M3Writer {
     pub fn raw(&mut self, name: &str, version: u32, data: Vec<u8>, reps: u32) -> u32 {
         let mut n: [u8; 4] = name.as_bytes().try_into().expect("tag names are 4 bytes");
         n.reverse();
-        self.tags.push(Tag { name: n, version, data, reps });
+        self.tags.push(Tag {
+            name: n,
+            version,
+            data,
+            reps,
+        });
         len32(self.tags.len() - 1)
     }
 
@@ -70,7 +78,11 @@ impl M3Writer {
         }
         let data = bytemuck::cast_slice(items).to_vec();
         let index = self.raw(name, version, data, len32(items.len()));
-        Reference { entries: len32(items.len()), index, flags: 0 }
+        Reference {
+            entries: len32(items.len()),
+            index,
+            flags: 0,
+        }
     }
 
     /// Records whose on-disk size differs from the Rust struct (older
@@ -80,7 +92,11 @@ impl M3Writer {
             return Reference::zeroed();
         }
         let index = self.raw(name, version, records.concat(), len32(records.len()));
-        Reference { entries: len32(records.len()), index, flags: 0 }
+        Reference {
+            entries: len32(records.len()),
+            index,
+            flags: 0,
+        }
     }
 
     /// A NUL-terminated `CHAR` string. The empty string is the null reference.
@@ -92,7 +108,11 @@ impl M3Writer {
         data.push(0);
         let n = len32(data.len());
         let index = self.raw("CHAR", 0, data, n);
-        Reference { entries: n, index, flags: 0 }
+        Reference {
+            entries: n,
+            index,
+            flags: 0,
+        }
     }
 
     pub fn finish(self) -> Vec<u8> {
@@ -124,42 +144,42 @@ impl M3Writer {
 /// One vertex. Only the components `vertex_flags` enables are written.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Vtx {
-    pub pos:     [f32; 3],
-    pub normal:  [u8; 4],
+    pub pos: [f32; 3],
+    pub normal: [u8; 4],
     pub tangent: [u8; 4],
-    pub uv0:     [i16; 2],
-    pub uv1:     [i16; 2],
+    pub uv0: [i16; 2],
+    pub uv1: [i16; 2],
     pub weights: [u8; 4],
     pub lookups: [u8; 4],
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RegionSpec {
-    pub first_vertex:      u32,
-    pub vertex_count:      u32,
-    pub first_face:        u32,
-    pub face_count:        u32,
+    pub first_vertex: u32,
+    pub vertex_count: u32,
+    pub first_face: u32,
+    pub face_count: u32,
     pub first_bone_lookup: u16,
     pub bone_lookup_count: u16,
-    pub flags:             u32,
-    pub uv_multiply:       f32,
-    pub uv_offset:         f32,
+    pub flags: u32,
+    pub uv_multiply: f32,
+    pub uv_offset: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BatchSpec {
     pub region: u16,
-    pub matm:   u16,
-    pub bone:   i16,
+    pub matm: u16,
+    pub bone: i16,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BoneSpec {
-    pub name:     String,
-    pub parent:   i16,
-    pub t:        [f32; 3],
-    pub r:        [f32; 4],
-    pub s:        [f32; 3],
+    pub name: String,
+    pub parent: i16,
+    pub t: [f32; 3],
+    pub r: [f32; 4],
+    pub s: [f32; 3],
     /// Animation ids of the location / rotation / scale tracks (0 = none).
     pub anim_ids: [u32; 3],
     /// `(header.flags, header.id, default)` of the batching toggle.
@@ -168,19 +188,25 @@ pub struct BoneSpec {
 
 impl BoneSpec {
     pub fn named(name: &str, parent: i16) -> Self {
-        Self { name: name.into(), parent, r: [0.0, 0.0, 0.0, 1.0], s: [1.0; 3], ..Self::default() }
+        Self {
+            name: name.into(),
+            parent,
+            r: [0.0, 0.0, 0.0, 1.0],
+            s: [1.0; 3],
+            ..Self::default()
+        }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct LayerSpec {
-    pub texture:   String,
+    pub texture: String,
     /// Flat colour, stored `[b, g, r, a]`; sets the colour-layer flag.
-    pub color:     Option<[u8; 4]>,
+    pub color: Option<[u8; 4]>,
     pub uv_tiling: [f32; 2],
     /// `color_multiply` as `(default, animation id)`; `None` writes `(1.0, 0)`,
     /// what real files carry for a layer drawn as authored.
-    pub multiply:  Option<(f32, u32)>,
+    pub multiply: Option<(f32, u32)>,
     /// `color_brightness`, likewise.
     pub brightness: Option<(f32, u32)>,
     /// `uv_offset` as `(default, animation id)`; `None` writes `([0, 0], 0)`.
@@ -189,18 +215,18 @@ pub struct LayerSpec {
     /// particle's flipbook cell, …
     pub uv_source: u32,
     /// `color_channels`: 0 RGB, 1 ARGB, 2 alpha, 3 red, 4 green, 5 blue.
-    pub channels:  u32,
+    pub channels: u32,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct MatSpec {
-    pub blend:           u32,
+    pub blend: u32,
     /// `blend_mode_emis1`, written at its version's offset (v19 and v20 only).
-    pub emis_blend:      u32,
-    pub flags:           u32,
+    pub emis_blend: u32,
+    pub flags: u32,
     pub alpha_threshold: u32,
     /// `(layer name, layer)` — `"diff"`, `"norm"`, `"emis1"`, `"ao"`, …
-    pub layers:          Vec<(&'static str, LayerSpec)>,
+    pub layers: Vec<(&'static str, LayerSpec)>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +241,7 @@ pub enum Track {
 
 #[derive(Debug, Clone, Default)]
 pub struct StcSpec {
-    pub name:   String,
+    pub name: String,
     pub tracks: Vec<(u32, Track)>,
     /// Write `anim_refs` one entry short — an inconsistent table.
     pub short_refs: bool,
@@ -232,83 +258,83 @@ pub struct SeqSpec {
 /// empty MD34 file with the most common tag versions.
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
-    pub magic:        [u8; 4],
+    pub magic: [u8; 4],
     pub vertex_flags: u32,
-    pub vertices:     Vec<Vtx>,
+    pub vertices: Vec<Vtx>,
     /// Extra bytes appended to the vertex buffer (or negative: truncated).
     pub vertex_slack: i32,
-    pub faces:        Vec<u16>,
+    pub faces: Vec<u16>,
     pub regn_version: u32,
-    pub regions:      Vec<RegionSpec>,
-    pub batches:      Vec<BatchSpec>,
+    pub regions: Vec<RegionSpec>,
+    pub batches: Vec<BatchSpec>,
     /// Emit DIV_ + U8__ even when there are no vertices.
     pub force_division: bool,
-    pub bone_lookup:  Vec<u16>,
-    pub bones:        Vec<BoneSpec>,
-    pub iref:         bool,
-    pub mat_version:  u32,
+    pub bone_lookup: Vec<u16>,
+    pub bones: Vec<BoneSpec>,
+    pub iref: bool,
+    pub mat_version: u32,
     pub layr_version: u32,
-    pub materials:    Vec<MatSpec>,
+    pub materials: Vec<MatSpec>,
     pub madd_version: u32,
-    pub madds:        Vec<Vec<String>>,
+    pub madds: Vec<Vec<String>>,
     /// `STBM` splat-terrain-bake materials, each its diffuse layer.
-    pub splat_bakes:  Vec<LayerSpec>,
+    pub splat_bakes: Vec<LayerSpec>,
     /// `blend_mode` of each MADD, index-aligned with `madds`; missing = 0.
-    pub madd_blends:  Vec<u32>,
-    pub matms:        Vec<(u32, u32)>,
-    pub composites:   Vec<Vec<u32>>,
+    pub madd_blends: Vec<u32>,
+    pub matms: Vec<(u32, u32)>,
+    pub composites: Vec<Vec<u32>>,
     pub seqs_version: u32,
-    pub sequences:    Vec<SeqSpec>,
-    pub stcs:         Vec<StcSpec>,
-    pub par_version:  u32,
-    pub particles:    Vec<Par>,
+    pub sequences: Vec<SeqSpec>,
+    pub stcs: Vec<StcSpec>,
+    pub par_version: u32,
+    pub particles: Vec<Par>,
     pub lite_version: u32,
-    pub lights:       Vec<Lite>,
+    pub lights: Vec<Lite>,
     pub proj_version: u32,
-    pub projections:  Vec<Proj>,
-    pub att_version:  u32,
-    pub attachments:  Vec<(String, u32)>,
+    pub projections: Vec<Proj>,
+    pub att_version: u32,
+    pub attachments: Vec<(String, u32)>,
     pub atvl_version: u32,
-    pub volumes:      Vec<Atvl>,
+    pub volumes: Vec<Atvl>,
 }
 
 impl Default for ModelSpec {
     fn default() -> Self {
         Self {
-            magic:          *b"43DM",
-            vertex_flags:   0,
-            vertices:       Vec::new(),
-            vertex_slack:   0,
-            faces:          Vec::new(),
-            regn_version:   5,
-            regions:        Vec::new(),
-            batches:        Vec::new(),
+            magic: *b"43DM",
+            vertex_flags: 0,
+            vertices: Vec::new(),
+            vertex_slack: 0,
+            faces: Vec::new(),
+            regn_version: 5,
+            regions: Vec::new(),
+            batches: Vec::new(),
             force_division: false,
-            bone_lookup:    Vec::new(),
-            bones:          Vec::new(),
-            iref:           false,
-            mat_version:    19,
-            layr_version:   22,
-            materials:      Vec::new(),
-            madd_version:   3,
-            madds:          Vec::new(),
-            splat_bakes:    Vec::new(),
-            madd_blends:    Vec::new(),
-            matms:          Vec::new(),
-            composites:     Vec::new(),
-            seqs_version:   2,
-            sequences:      Vec::new(),
-            stcs:           Vec::new(),
-            par_version:    24,
-            particles:      Vec::new(),
-            lite_version:   7,
-            lights:         Vec::new(),
-            proj_version:   5,
-            projections:    Vec::new(),
-            att_version:    1,
-            attachments:    Vec::new(),
-            atvl_version:   0,
-            volumes:        Vec::new(),
+            bone_lookup: Vec::new(),
+            bones: Vec::new(),
+            iref: false,
+            mat_version: 19,
+            layr_version: 22,
+            materials: Vec::new(),
+            madd_version: 3,
+            madds: Vec::new(),
+            splat_bakes: Vec::new(),
+            madd_blends: Vec::new(),
+            matms: Vec::new(),
+            composites: Vec::new(),
+            seqs_version: 2,
+            sequences: Vec::new(),
+            stcs: Vec::new(),
+            par_version: 24,
+            particles: Vec::new(),
+            lite_version: 7,
+            lights: Vec::new(),
+            proj_version: 5,
+            projections: Vec::new(),
+            att_version: 1,
+            attachments: Vec::new(),
+            atvl_version: 0,
+            volumes: Vec::new(),
         }
     }
 }
@@ -331,12 +357,32 @@ impl ModelSpec {
         };
         Self {
             vertex_flags: FLAGS_STATIC,
-            vertices: vec![v(0.0, 0.0, 0, 0), v(1.0, 0.0, 2048, 0), v(1.0, 1.0, 2048, 2048), v(0.0, 1.0, 0, 2048)],
+            vertices: vec![
+                v(0.0, 0.0, 0, 0),
+                v(1.0, 0.0, 2048, 0),
+                v(1.0, 1.0, 2048, 2048),
+                v(0.0, 1.0, 0, 2048),
+            ],
             faces: vec![0, 1, 2, 0, 2, 3],
-            regions: vec![RegionSpec { vertex_count: 4, face_count: 6, uv_multiply: 16.0, ..RegionSpec::default() }],
-            batches: vec![BatchSpec { region: 0, matm: 0, bone: -1 }],
+            regions: vec![RegionSpec {
+                vertex_count: 4,
+                face_count: 6,
+                uv_multiply: 16.0,
+                ..RegionSpec::default()
+            }],
+            batches: vec![BatchSpec {
+                region: 0,
+                matm: 0,
+                bone: -1,
+            }],
             materials: vec![MatSpec {
-                layers: vec![("diff", LayerSpec { texture: "Assets\\Textures\\quad_diff.dds".into(), ..LayerSpec::default() })],
+                layers: vec![(
+                    "diff",
+                    LayerSpec {
+                        texture: "Assets\\Textures\\quad_diff.dds".into(),
+                        ..LayerSpec::default()
+                    },
+                )],
                 ..MatSpec::default()
             }],
             matms: vec![(1, 0)],
@@ -395,7 +441,10 @@ impl ModelSpec {
         }
         match usize::try_from(self.vertex_slack) {
             Ok(extra) => vbuf.resize(vbuf.len() + extra, 0),
-            Err(_) => vbuf.truncate(vbuf.len().saturating_sub(self.vertex_slack.unsigned_abs() as usize)),
+            Err(_) => vbuf.truncate(
+                vbuf.len()
+                    .saturating_sub(self.vertex_slack.unsigned_abs() as usize),
+            ),
         }
 
         let geometry = !self.vertices.is_empty() || self.force_division;
@@ -418,7 +467,13 @@ impl ModelSpec {
             .collect();
         let batches = w.pods("BAT_", 1, &batches);
         if geometry {
-            let div = Div { faces, regions, batches, msec: Reference::zeroed(), instances: 0 };
+            let div = Div {
+                faces,
+                regions,
+                batches,
+                msec: Reference::zeroed(),
+                instances: 0,
+            };
             w.pods("DIV_", 2, &[div]);
         }
     }
@@ -434,7 +489,12 @@ impl ModelSpec {
                 bone.name = w.chars(&b.name);
                 bone.parent = b.parent;
                 bone.location.default = vec3(b.t);
-                bone.rotation.default = m3_to_glb::m3::structures::Quat { x: b.r[0], y: b.r[1], z: b.r[2], w: b.r[3] };
+                bone.rotation.default = m3_to_glb::m3::structures::Quat {
+                    x: b.r[0],
+                    y: b.r[1],
+                    z: b.r[2],
+                    w: b.r[3],
+                };
                 bone.scale.default = vec3(b.s);
                 bone.location.header.id = b.anim_ids[0];
                 bone.rotation.header.id = b.anim_ids[1];
@@ -455,7 +515,11 @@ impl ModelSpec {
 
     /// `MAT_` + `LAYR`, `MADD`, `MATM` and `CMP_`.
     fn write_materials(&self, w: &mut M3Writer) {
-        let mats: Vec<Vec<u8>> = self.materials.iter().map(|m| self.mat_bytes(w, m)).collect();
+        let mats: Vec<Vec<u8>> = self
+            .materials
+            .iter()
+            .map(|m| self.mat_bytes(w, m))
+            .collect();
         w.records("MAT_", self.mat_version, &mats);
         let madds: Vec<Vec<u8>> = self
             .madds
@@ -489,7 +553,14 @@ impl ModelSpec {
             })
             .collect();
         w.records("STBM", 0, &bakes);
-        let matms: Vec<Matm> = self.matms.iter().map(|&(t, i)| Matm { mat_type: t, material_index: i }).collect();
+        let matms: Vec<Matm> = self
+            .matms
+            .iter()
+            .map(|&(t, i)| Matm {
+                mat_type: t,
+                material_index: i,
+            })
+            .collect();
         w.pods("MATM", 0, &matms);
         let cmps: Vec<Vec<u8>> = self
             .composites
@@ -497,7 +568,10 @@ impl ModelSpec {
             .map(|sections| {
                 let cms: Vec<Cms> = sections
                     .iter()
-                    .map(|&i| Cms { material_reference_index: i, ..Cms::zeroed() })
+                    .map(|&i| Cms {
+                        material_reference_index: i,
+                        ..Cms::zeroed()
+                    })
                     .collect();
                 let r = w.pods("CMS_", 0, &cms);
                 let mut rec = vec![0u8; 28];
@@ -528,7 +602,10 @@ impl ModelSpec {
                 } else {
                     bytemuck::bytes_of(&seq).to_vec()
                 };
-                let stg = Stg { name: seq.name, stc_indices: w.pods("U32_", 0, &s.stcs) };
+                let stg = Stg {
+                    name: seq.name,
+                    stc_indices: w.pods("U32_", 0, &s.stcs),
+                };
                 (rec, stg)
             })
             .unzip();
@@ -539,7 +616,11 @@ impl ModelSpec {
 
     /// Particles, lights, projections, attachment points and volumes.
     fn write_effects(&self, w: &mut M3Writer) {
-        let pars: Vec<Vec<u8>> = self.particles.iter().map(|p| par_bytes(p, self.par_version)).collect();
+        let pars: Vec<Vec<u8>> = self
+            .particles
+            .iter()
+            .map(|p| par_bytes(p, self.par_version))
+            .collect();
         w.records("PAR_", self.par_version, &pars);
         w.pods("LITE", self.lite_version, &self.lights);
         w.pods("PROJ", self.proj_version, &self.projections);
@@ -598,7 +679,9 @@ impl ModelSpec {
             rec[at..at + 4].copy_from_slice(&mat.emis_blend.to_le_bytes());
         }
         for (name, layer) in &mat.layers {
-            let Some(at) = M3File::mat_layer_offset(self.mat_version, name) else { continue };
+            let Some(at) = M3File::mat_layer_offset(self.mat_version, name) else {
+                continue;
+            };
             let r = self.layer(w, layer);
             rec[at..at + 12].copy_from_slice(bytemuck::bytes_of(&r));
         }
@@ -634,7 +717,11 @@ impl ModelSpec {
 }
 
 fn vec3(v: [f32; 3]) -> m3_to_glb::m3::structures::Vec3 {
-    m3_to_glb::m3::structures::Vec3 { x: v[0], y: v[1], z: v[2] }
+    m3_to_glb::m3::structures::Vec3 {
+        x: v[0],
+        y: v[1],
+        z: v[2],
+    }
 }
 
 /// SD block: `frames` (I32_) + `keys` (typed), 32 bytes.
@@ -649,7 +736,8 @@ fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
     out.name = w.chars(&spec.name);
     let mut ids = Vec::new();
     let mut refs = Vec::new();
-    let (mut vec3s, mut quats, mut reals, mut i16s, mut u16s) = (vec![], vec![], vec![], vec![], vec![]);
+    let (mut vec3s, mut quats, mut reals, mut i16s, mut u16s) =
+        (vec![], vec![], vec![], vec![], vec![]);
     let mut vec2s = vec![];
     for (id, track) in &spec.tracks {
         let (kind, blocks, block) = match track {
@@ -657,7 +745,17 @@ fn stc(w: &mut M3Writer, spec: &StcSpec) -> Stc {
             Track::Quat(k) => {
                 let k: Vec<(i32, m3_to_glb::m3::structures::Quat)> = k
                     .iter()
-                    .map(|&(t, v)| (t, m3_to_glb::m3::structures::Quat { x: v[0], y: v[1], z: v[2], w: v[3] }))
+                    .map(|&(t, v)| {
+                        (
+                            t,
+                            m3_to_glb::m3::structures::Quat {
+                                x: v[0],
+                                y: v[1],
+                                z: v[2],
+                                w: v[3],
+                            },
+                        )
+                    })
                     .collect();
                 (3, &mut quats, sd_block(w, "QUAT", &k))
             }
@@ -699,7 +797,6 @@ fn par_bytes(p: &Par, version: u32) -> Vec<u8> {
     }
 }
 
-
 // ─── Shared fixtures ─────────────────────────────────────────────────────────
 
 /// [`ModelSpec::quad`] skinned to a two-bone chain.
@@ -711,8 +808,14 @@ pub fn skinned_quad() -> ModelSpec {
         v.lookups = [u8::from(i % 2 == 1), 1, 0, 0];
     }
     spec.bones = vec![
-        BoneSpec { t: [0.0, 0.0, 1.0], ..BoneSpec::named("Root", -1) },
-        BoneSpec { t: [0.0, 1.0, 0.0], ..BoneSpec::named("Child", 0) },
+        BoneSpec {
+            t: [0.0, 0.0, 1.0],
+            ..BoneSpec::named("Root", -1)
+        },
+        BoneSpec {
+            t: [0.0, 1.0, 0.0],
+            ..BoneSpec::named("Child", 0)
+        },
     ];
     spec.bone_lookup = vec![0, 1];
     spec.regions[0].bone_lookup_count = 2;
@@ -731,34 +834,76 @@ pub fn animated() -> ModelSpec {
         StcSpec {
             name: "Stand_full".into(),
             tracks: vec![
-                (11, Track::Vec3(vec![(0, [0.0, 0.0, 0.0]), (500, [0.0, 0.0, 1.0]), (500, [0.0, 0.0, 2.0]), (1000, [0.0; 3])])),
-                (12, Track::Quat(vec![(0, [0.0, 0.0, 0.0, 1.0]), (1000, [0.0, 0.0, 0.0, -1.0])])),
+                (
+                    11,
+                    Track::Vec3(vec![
+                        (0, [0.0, 0.0, 0.0]),
+                        (500, [0.0, 0.0, 1.0]),
+                        (500, [0.0, 0.0, 2.0]),
+                        (1000, [0.0; 3]),
+                    ]),
+                ),
+                (
+                    12,
+                    Track::Quat(vec![
+                        (0, [0.0, 0.0, 0.0, 1.0]),
+                        (1000, [0.0, 0.0, 0.0, -1.0]),
+                    ]),
+                ),
                 (13, Track::Vec3(vec![(0, [1.0; 3])])),
-                (21, Track::Vec3(vec![(0, [0.0; 3]), (-5, [1.0; 3]), (200, [2.0; 3])])),
+                (
+                    21,
+                    Track::Vec3(vec![(0, [0.0; 3]), (-5, [1.0; 3]), (200, [2.0; 3])]),
+                ),
                 // Wrong kind for a rotation id: ignored.
                 (22, Track::Real(vec![(0, 1.0)])),
             ],
             ..StcSpec::default()
         },
-        StcSpec { name: "Loose".into(), tracks: vec![(21, Track::Vec3(vec![(0, [0.0; 3])]))], ..StcSpec::default() },
+        StcSpec {
+            name: "Loose".into(),
+            tracks: vec![(21, Track::Vec3(vec![(0, [0.0; 3])]))],
+            ..StcSpec::default()
+        },
         // No name → skipped; mismatched tables → skipped; no matching bone → skipped.
-        StcSpec { name: String::new(), tracks: vec![(11, Track::Vec3(vec![(0, [0.0; 3])]))], ..StcSpec::default() },
+        StcSpec {
+            name: String::new(),
+            tracks: vec![(11, Track::Vec3(vec![(0, [0.0; 3])]))],
+            ..StcSpec::default()
+        },
         StcSpec {
             name: "Short".into(),
-            tracks: vec![(11, Track::Vec3(vec![(0, [0.0; 3])])), (12, Track::Vec3(vec![(0, [0.0; 3])]))],
+            tracks: vec![
+                (11, Track::Vec3(vec![(0, [0.0; 3])])),
+                (12, Track::Vec3(vec![(0, [0.0; 3])])),
+            ],
             short_refs: true,
         },
-        StcSpec { name: "Nobody".into(), tracks: vec![(999, Track::Vec3(vec![(0, [0.0; 3])]))], ..StcSpec::default() },
-        StcSpec { name: "Empty".into(), tracks: vec![], ..StcSpec::default() },
+        StcSpec {
+            name: "Nobody".into(),
+            tracks: vec![(999, Track::Vec3(vec![(0, [0.0; 3])]))],
+            ..StcSpec::default()
+        },
+        StcSpec {
+            name: "Empty".into(),
+            tracks: vec![],
+            ..StcSpec::default()
+        },
     ];
-    spec.sequences = vec![SeqSpec { name: "Stand".into(), stcs: vec![0, 0, 42] }];
+    spec.sequences = vec![SeqSpec {
+        name: "Stand".into(),
+        stcs: vec![0, 0, 42],
+    }];
     spec
 }
 
 /// A skeleton-only model carrying one of each effect kind, with animated
 /// emitter tracks and materials reached directly, via a composite and via MADD.
 pub fn with_effects() -> ModelSpec {
-    let mut spec = ModelSpec { bones: vec![BoneSpec::named("Bone_FX", -1)], ..ModelSpec::default() };
+    let mut spec = ModelSpec {
+        bones: vec![BoneSpec::named("Bone_FX", -1)],
+        ..ModelSpec::default()
+    };
     let mut par = Par::zeroed();
     par.emit_rate.default = 10.0;
     par.emit_rate.header.id = 77;
@@ -776,9 +921,17 @@ pub fn with_effects() -> ModelSpec {
     proj.material_reference_index = 1;
     proj.pitch.default = 0.5;
     spec.projections = vec![proj, Proj { bone: 9, ..proj }];
-    spec.materials = vec![
-        MatSpec { blend: 2, layers: vec![("emis1", LayerSpec { color: Some([0, 0, 255, 255]), ..LayerSpec::default() })], ..MatSpec::default() },
-    ];
+    spec.materials = vec![MatSpec {
+        blend: 2,
+        layers: vec![(
+            "emis1",
+            LayerSpec {
+                color: Some([0, 0, 255, 255]),
+                ..LayerSpec::default()
+            },
+        )],
+        ..MatSpec::default()
+    }];
     spec.madds = vec![vec!["fx_diff.dds".into()]];
     spec.madd_blends = vec![1];
     spec.matms = vec![(1, 0), (3, 0), (12, 0), (5, 0)];
@@ -786,7 +939,10 @@ pub fn with_effects() -> ModelSpec {
     spec.stcs = vec![StcSpec {
         name: "Birth".into(),
         tracks: vec![
-            (77, Track::Real((0..100).map(|i| (i * 10, i as f32)).collect())),
+            (
+                77,
+                Track::Real((0..100).map(|i| (i * 10, i as f32)).collect()),
+            ),
             (78, Track::I16(vec![(0, 5), (100, 0)])),
             (79, Track::Vec3(vec![(0, [1.0; 3]), (40, [2.0; 3])])),
             (80, Track::Real(vec![(0, 0.0), (50, 3.0)])),
@@ -817,12 +973,15 @@ pub fn corrupt(bytes: &mut [u8], edits: &[(u32, u8)]) {
 #[derive(Debug)]
 pub struct GlbSummary {
     pub json: serde_json::Value,
-    pub bin:  Vec<u8>,
+    pub bin: Vec<u8>,
 }
 
 impl GlbSummary {
     pub fn count(&self, key: &str) -> usize {
-        self.json.get(key).and_then(|v| v.as_array()).map_or(0, Vec::len)
+        self.json
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map_or(0, Vec::len)
     }
 
     /// Nodes whose `extras` carry `key` (`"m3fx"` / `"m3attach"`).
@@ -836,7 +995,10 @@ impl GlbSummary {
     }
 
     pub fn node_named(&self, name: &str) -> Option<&serde_json::Value> {
-        self.json["nodes"].as_array()?.iter().find(|n| n["name"] == name)
+        self.json["nodes"]
+            .as_array()?
+            .iter()
+            .find(|n| n["name"] == name)
     }
 }
 
@@ -855,7 +1017,9 @@ pub fn check_glb(glb: &[u8]) -> Result<GlbSummary, String> {
     // The `gltf` crate does not implement KHR_texture_basisu and rejects any
     // file that requires it; for those, load without its validation pass and
     // rely on the checks below.
-    let basisu = json.get("extensionsUsed").is_some_and(|e| e.to_string().contains("KHR_texture_basisu"));
+    let basisu = json
+        .get("extensionsUsed")
+        .is_some_and(|e| e.to_string().contains("KHR_texture_basisu"));
     let doc = if basisu {
         gltf::Gltf::from_slice_without_validation(glb)
     } else {
@@ -900,7 +1064,10 @@ fn split_chunks(glb: &[u8]) -> Result<(serde_json::Value, Vec<u8>), String> {
 fn check_ranges(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
     let declared = doc.buffers().next().map_or(0, |b| b.length());
     if declared > bin.len() {
-        return Err(format!("buffer declares {declared} bytes, BIN has {}", bin.len()));
+        return Err(format!(
+            "buffer declares {declared} bytes, BIN has {}",
+            bin.len()
+        ));
     }
     if let Some(v) = doc.views().find(|v| v.offset() + v.length() > declared) {
         return Err(format!("bufferView {} out of range", v.index()));
@@ -928,7 +1095,10 @@ fn accessor_bytes<'b>(a: &gltf::Accessor<'_>, bin: &'b [u8]) -> &'b [u8] {
 /// addresses one of those vertices.
 fn check_indices(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
     for p in doc.meshes().flat_map(|m| m.primitives()) {
-        let verts = p.get(&gltf::Semantic::Positions).ok_or("primitive without POSITION")?.count();
+        let verts = p
+            .get(&gltf::Semantic::Positions)
+            .ok_or("primitive without POSITION")?
+            .count();
         if p.attributes().any(|(_, a)| a.count() != verts) {
             return Err("attribute counts differ within a primitive".into());
         }
@@ -948,9 +1118,13 @@ fn check_indices(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
 fn check_animations(doc: &gltf::Gltf, bin: &[u8]) -> Result<(), String> {
     for anim in doc.animations() {
         for sampler in anim.samplers() {
-            let times: Vec<f32> = bytemuck::pod_collect_to_vec(accessor_bytes(&sampler.input(), bin));
+            let times: Vec<f32> =
+                bytemuck::pod_collect_to_vec(accessor_bytes(&sampler.input(), bin));
             if times.iter().any(|t| !t.is_finite()) || times.windows(2).any(|w| w[0] >= w[1]) {
-                return Err(format!("animation '{}' has non-increasing input", anim.name().unwrap_or("")));
+                return Err(format!(
+                    "animation '{}' has non-increasing input",
+                    anim.name().unwrap_or("")
+                ));
             }
             if sampler.output().count() != sampler.input().count() {
                 return Err("sampler input/output count mismatch".into());
@@ -984,11 +1158,18 @@ fn check_hierarchy(doc: &gltf::Gltf) -> Result<(), String> {
             return Err(format!("cycle through node {start}"));
         }
     }
-    if let Some(root) = doc.scenes().flat_map(|s| s.nodes()).find(|r| parent[r.index()].is_some()) {
+    if let Some(root) = doc
+        .scenes()
+        .flat_map(|s| s.nodes())
+        .find(|r| parent[r.index()].is_some())
+    {
         return Err(format!("scene root {} has a parent", root.index()));
     }
     for skin in doc.skins() {
-        if skin.inverse_bind_matrices().is_some_and(|ibm| ibm.count() != skin.joints().count()) {
+        if skin
+            .inverse_bind_matrices()
+            .is_some_and(|ibm| ibm.count() != skin.joints().count())
+        {
             return Err("IBM count != joint count".into());
         }
     }

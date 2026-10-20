@@ -20,12 +20,18 @@
 //! └─────────────────────────────┘
 //! ```
 
+// The `#[repr(C)]` record layouts are aligned by hand into columns (name,
+// type) so each struct reads like the format table it mirrors; rustfmt would
+// collapse that alignment.
+#[rustfmt::skip]
 pub mod structures;
 pub mod reader;
 
-pub use reader::{M3File, layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags};
+pub use reader::{
+    M3File, layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags,
+};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Parse an M3 file from an mmap buffer. Zero-copy — no allocations.
 ///

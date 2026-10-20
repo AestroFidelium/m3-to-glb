@@ -20,14 +20,6 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Stable with the components we need.
-        rustStable = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [
-            "rust-src" # required by rust-analyzer
-            "llvm-tools-preview" # required by cargo-llvm-lines, cargo-show-asm
-          ];
-        };
-
         # Nightly — for cranelift, polonius, std::simd, optimize_attribute.
         rustNightly = pkgs.rust-bin.nightly.latest.default.override {
           extensions = [
@@ -55,9 +47,9 @@
           # nixpkgs' fetchurl User-Agent (`curl/X Nixpkgs/Y`) — and crates.io now
           # answers 403 to any `curl/*` UA, so every crate fails to fetch.
           # `cargoHash` goes through `fetchCargoVendor`, which pulls from the
-          # `static.crates.io` CDN instead. Re-run with `cargoHash = "sha256-RAqspCxyUgQdMSJZ583cHoSVvS412wtEkGSfxUq37Oo=";` and copy
+          # `static.crates.io` CDN instead. Re-run with `cargoHash = pkgs.lib.fakeHash;` and copy
           # the reported hash whenever Cargo.lock changes.
-          cargoHash = "sha256-RAqspCxyUgQdMSJZ583cHoSVvS412wtEkGSfxUq37Oo=";
+          cargoHash = "sha256-CAXyi0iGbk4ehliv6mxY+/HpB5cxu0TP0Jwf/QEZ5qk=";
 
           # `.cargo/config.toml` pins clang + mold as the linker.
           # `installShellFiles` ships the completions the binary prints with
@@ -105,7 +97,7 @@
 
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [
-            rustNightly # swap for rustStable if nightly isn't needed
+            rustNightly
 
             # Linker — speeds up dev `cargo build` by 5-10x.
             pkgs.mold
@@ -120,6 +112,17 @@
             pkgs.cargo-watch # watcher for scripts and CI
             pkgs.bacon # smart watcher with a TUI
             pkgs.cargo-tarpaulin # code coverage (Linux only)
+            pkgs.cargo-llvm-cov # branch coverage (`tools/gate cov`)
+            pkgs.cargo-mutants # mutation testing (`tools/mutants_night.sh`)
+            pkgs.jq # tools/mutants_night.sh reads cargo-mutants' outcomes.json
+
+            # Everything `tools/gate all` runs beyond cargo itself.
+            pkgs.cargo-deny
+            pkgs.cargo-machete
+            pkgs.typos
+            pkgs.nixfmt
+            pkgs.statix
+            pkgs.deadnix
 
             # System profiling tools
             pkgs.linuxPackages.perf # perf stat, perf record
@@ -133,7 +136,11 @@
             pkgs.openssl.dev
           ];
 
+          # Versioned hooks in .githooks/: pre-commit runs `tools/gate quick`,
+          # commit-msg enforces Conventional Commits. Fix hooks there, never in .git/hooks.
           shellHook = ''
+            git config core.hooksPath .githooks 2>/dev/null || true
+
             # mold linker via clang
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${pkgs.clang}/bin/clang"
             export RUSTFLAGS="-C link-arg=-fuse-ld=${pkgs.mold}/bin/mold"

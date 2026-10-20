@@ -5,7 +5,7 @@
 //! (bounded random driver) and as real fuzzing via `cargo bolero test <name>`.
 
 use bolero::check;
-use m3_to_glb::m3::{detect_version, stride_from_flags, M3Version};
+use m3_to_glb::m3::{M3Version, detect_version, stride_from_flags};
 use m3_to_glb::processor::VertexOffsets;
 
 // ── detect_version ───────────────────────────────────────────────────────────
@@ -99,7 +99,8 @@ fn offsets_fit_within_stride() {
             assert!(
                 s.lookups_offset + s.pairs <= stride,
                 "flags={flags:#010x}: skin lookups at {} (+{}) exceeds stride {stride}",
-                s.lookups_offset, s.pairs,
+                s.lookups_offset,
+                s.pairs,
             );
         }
     });

@@ -86,32 +86,84 @@ fn upgrade_par(raw: &[u8], version: u32) -> Par {
 pub fn stride_from_flags(flags: u32) -> usize {
     let mut size: usize = 12; // pos (always present)
 
-    if flags & 0x0000_0020 != 0 { size += 4; } // skin0: 2×(lookup+weight) = 4B
-    if flags & 0x0000_0040 != 0 { size += 4; } // skin1: 2×(lookup+weight) = 4B
-    if flags & 0x0000_0080 != 0 { size += 12; } // normalf (uncompressed normal)
-    if flags & 0x0000_0100 != 0 { size += 4; } // test100
-    if flags & 0x0000_0200 != 0 { size += 4; } // color (COL)
-    if flags & 0x0000_0400 != 0 { size += 4; } // test400
-    if flags & 0x0000_0800 != 0 { size += 4; } // test800
-    if flags & 0x0000_1000 != 0 { size += 4; } // test1000
-    if flags & 0x0000_2000 != 0 { size += 8; } // fuv0 (float vec2)
-    if flags & 0x0000_4000 != 0 { size += 8; } // fuv1
-    if flags & 0x0000_8000 != 0 { size += 8; } // fuv2
-    if flags & 0x0001_0000 != 0 { size += 8; } // fuv3
-    if flags & 0x0002_0000 != 0 { size += 4; } // uv0 (int16×2)
-    if flags & 0x0004_0000 != 0 { size += 4; } // uv1
-    if flags & 0x0008_0000 != 0 { size += 4; } // uv2
-    if flags & 0x0010_0000 != 0 { size += 4; } // uv3
-    if flags & 0x0020_0000 != 0 { size += 12; } // normalf2 (uncompressed normal #2)
-    if flags & 0x0040_0000 != 0 { size += 12; } // tanf (uncompressed tangent)
-    if flags & 0x0080_0000 != 0 { size += 4; } // normal (Vector3As3uint8 + sign)
-    if flags & 0x0100_0000 != 0 { size += 4; } // tangent (compressed)
-    if flags & 0x0200_0000 != 0 { size += 4; } // unknown
-    if flags & 0x0400_0000 != 0 { size += 12; } // unknown
-    if flags & 0x0800_0000 != 0 { size += 12; } // unknown
-    if flags & 0x1000_0000 != 0 { size += 4; } // unknown
-    if flags & 0x2000_0000 != 0 { size += 4; } // unknown
-    if flags & 0x4000_0000 != 0 { size += 4; } // uv4
+    if flags & 0x0000_0020 != 0 {
+        size += 4;
+    } // skin0: 2×(lookup+weight) = 4B
+    if flags & 0x0000_0040 != 0 {
+        size += 4;
+    } // skin1: 2×(lookup+weight) = 4B
+    if flags & 0x0000_0080 != 0 {
+        size += 12;
+    } // normalf (uncompressed normal)
+    if flags & 0x0000_0100 != 0 {
+        size += 4;
+    } // test100
+    if flags & 0x0000_0200 != 0 {
+        size += 4;
+    } // color (COL)
+    if flags & 0x0000_0400 != 0 {
+        size += 4;
+    } // test400
+    if flags & 0x0000_0800 != 0 {
+        size += 4;
+    } // test800
+    if flags & 0x0000_1000 != 0 {
+        size += 4;
+    } // test1000
+    if flags & 0x0000_2000 != 0 {
+        size += 8;
+    } // fuv0 (float vec2)
+    if flags & 0x0000_4000 != 0 {
+        size += 8;
+    } // fuv1
+    if flags & 0x0000_8000 != 0 {
+        size += 8;
+    } // fuv2
+    if flags & 0x0001_0000 != 0 {
+        size += 8;
+    } // fuv3
+    if flags & 0x0002_0000 != 0 {
+        size += 4;
+    } // uv0 (int16×2)
+    if flags & 0x0004_0000 != 0 {
+        size += 4;
+    } // uv1
+    if flags & 0x0008_0000 != 0 {
+        size += 4;
+    } // uv2
+    if flags & 0x0010_0000 != 0 {
+        size += 4;
+    } // uv3
+    if flags & 0x0020_0000 != 0 {
+        size += 12;
+    } // normalf2 (uncompressed normal #2)
+    if flags & 0x0040_0000 != 0 {
+        size += 12;
+    } // tanf (uncompressed tangent)
+    if flags & 0x0080_0000 != 0 {
+        size += 4;
+    } // normal (Vector3As3uint8 + sign)
+    if flags & 0x0100_0000 != 0 {
+        size += 4;
+    } // tangent (compressed)
+    if flags & 0x0200_0000 != 0 {
+        size += 4;
+    } // unknown
+    if flags & 0x0400_0000 != 0 {
+        size += 12;
+    } // unknown
+    if flags & 0x0800_0000 != 0 {
+        size += 12;
+    } // unknown
+    if flags & 0x1000_0000 != 0 {
+        size += 4;
+    } // unknown
+    if flags & 0x2000_0000 != 0 {
+        size += 4;
+    } // unknown
+    if flags & 0x4000_0000 != 0 {
+        size += 4;
+    } // uv4
 
     size
 }
@@ -261,7 +313,10 @@ impl<'data> M3File<'data> {
     #[must_use]
     pub fn mesh_count(&self) -> usize {
         // Number of REGN tags = number of regions (sub-meshes).
-        self.tags.iter().filter(|t| t.tag_bytes() == *b"NGER").count()
+        self.tags
+            .iter()
+            .filter(|t| t.tag_bytes() == *b"NGER")
+            .count()
     }
 
     /// Number of `MAT_` materials.
@@ -294,12 +349,16 @@ impl<'data> M3File<'data> {
     ///
     /// The texture list reference is out of range.
     pub fn madd_texture_paths(&self, madd_idx: usize) -> Result<Vec<String>> {
-        let Some(tex_paths_at) = self.madd_texture_paths_offset(madd_idx) else { return Ok(Vec::new()); };
+        let Some(tex_paths_at) = self.madd_texture_paths_offset(madd_idx) else {
+            return Ok(Vec::new());
+        };
         let Some(texture_paths_ref) = self.pod_at::<Reference>(tex_paths_at) else {
             return Ok(Vec::new());
         };
         debug!("MADD[{}] texture_paths: {:?}", madd_idx, texture_paths_ref);
-        if texture_paths_ref.entries == 0 { return Ok(Vec::new()); }
+        if texture_paths_ref.entries == 0 {
+            return Ok(Vec::new());
+        }
         let schrs: Vec<Schr> = self.read_ref_slice::<Schr>(&texture_paths_ref)?;
 
         let mut out = Vec::with_capacity(schrs.len());
@@ -488,7 +547,8 @@ impl<'data> M3File<'data> {
     /// to be emitted before they know how many bones there are.
     #[must_use]
     pub fn has_attachment_points(&self) -> bool {
-        self.find_tag(TAG_ATT).is_some_and(|i| self.tags[i].repetitions > 0)
+        self.find_tag(TAG_ATT)
+            .is_some_and(|i| self.tags[i].repetitions > 0)
     }
 
     /// ATVL attachment volumes (version 0 only), or an empty vec.
@@ -617,9 +677,9 @@ impl<'data> M3File<'data> {
         // RegnV2..RegnV5 in structures.rs.
         let file_elem_sz: usize = match version {
             0..=2 => 28, // till_v2: u16 first_vertex_index/vertex_count, no unknown01
-            3 => 36,         // +unknown01, u32 first_vertex_index/vertex_count
-            4 => 40,         // +flags
-            _ => 48,         // v5+: +uv_multiply, +uv_offset
+            3 => 36,     // +unknown01, u32 first_vertex_index/vertex_count
+            4 => 40,     // +flags
+            _ => 48,     // v5+: +uv_multiply, +uv_offset
         };
         let our_sz = std::mem::size_of::<Regn>(); // 48
 
@@ -732,12 +792,14 @@ impl<'data> M3File<'data> {
     /// can't represent at all (volume, displacement, …).
     fn resolve_matref_inner(
         &self,
-        matms:      &[Matm],
+        matms: &[Matm],
         composites: &[Cmp],
-        idx:        usize,
-        depth:      u8,
+        idx: usize,
+        depth: u8,
     ) -> Option<usize> {
-        if depth > 8 { return None; }
+        if depth > 8 {
+            return None;
+        }
         let matm = matms.get(idx)?;
         match matm.mat_type {
             1 | 12 => Some(idx),
@@ -746,7 +808,10 @@ impl<'data> M3File<'data> {
                 let sections = self.read_ref_slice::<Cms>(&cmp.sections).ok()?;
                 let first = sections.first()?;
                 self.resolve_matref_inner(
-                    matms, composites, first.material_reference_index as usize, depth + 1,
+                    matms,
+                    composites,
+                    first.material_reference_index as usize,
+                    depth + 1,
                 )
             }
             _ => None,
@@ -920,7 +985,10 @@ impl<'data> M3File<'data> {
 
         let base = entry.offset as usize + mat_idx * file_elem_sz;
         let r = self.pod_at::<Reference>(base + layer_off);
-        debug!("MAT_[{}] v{} layer '{}' at +{}: {:?}", mat_idx, version, layer, layer_off, r);
+        debug!(
+            "MAT_[{}] v{} layer '{}' at +{}: {:?}",
+            mat_idx, version, layer, layer_off, r
+        );
         r
     }
 
@@ -1002,7 +1070,12 @@ impl<'data> M3File<'data> {
 
     /// A float field of a material layer: its default value and animation id.
     #[must_use]
-    pub fn layer_float(&self, mat_idx: usize, layer: &str, field: LayerFloat) -> Option<(f32, u32)> {
+    pub fn layer_float(
+        &self,
+        mat_idx: usize,
+        layer: &str,
+        field: LayerFloat,
+    ) -> Option<(f32, u32)> {
         let (start, version) = self.mat_layer_record(mat_idx, layer)?;
         let at = start + field.offset(version);
         let id: u32 = self.pod_at(at + 4)?;
@@ -1032,14 +1105,16 @@ impl<'data> M3File<'data> {
     /// A material layer's `uv_tiling` at rest; `(1, 1)` for an empty slot.
     #[must_use]
     pub fn layer_uv_tiling(&self, mat_idx: usize, layer: &str) -> (f32, f32) {
-        self.mat_layer_ref(mat_idx, layer).map_or((1.0, 1.0), |r| self.read_layer_uv_tiling(&r))
+        self.mat_layer_ref(mat_idx, layer)
+            .map_or((1.0, 1.0), |r| self.read_layer_uv_tiling(&r))
     }
 
     /// Number of `STBM` splat-terrain-bake materials: what a map's scenery
     /// projections — the shadow under a building — draw with.
     #[must_use]
     pub fn splat_bake_count(&self) -> usize {
-        self.find_tag(b"MBTS").map_or(0, |i| self.tags[i].repetitions as usize)
+        self.find_tag(b"MBTS")
+            .map_or(0, |i| self.tags[i].repetitions as usize)
     }
 
     /// The diffuse bitmap of `STBM` record `idx` — `name | diff | norm | spec`,
@@ -1048,7 +1123,9 @@ impl<'data> M3File<'data> {
     pub fn splat_bake_texture_path(&self, idx: usize) -> String {
         const RECORD: usize = 48;
         const DIFF: usize = 12;
-        let Some(tag) = self.find_tag(b"MBTS").map(|i| &self.tags[i]) else { return String::new() };
+        let Some(tag) = self.find_tag(b"MBTS").map(|i| &self.tags[i]) else {
+            return String::new();
+        };
         if idx >= tag.repetitions as usize {
             return String::new();
         }
@@ -1066,7 +1143,10 @@ impl<'data> M3File<'data> {
         let at = start + layr_uv_offset_offset(version);
         let id: u32 = self.pod_at(at + 4)?;
         let default: [f32; 2] = self.pod_at(at + 8)?;
-        default.iter().all(|v| v.is_finite()).then_some((default, id))
+        default
+            .iter()
+            .all(|v| v.is_finite())
+            .then_some((default, id))
     }
 
     /// Read `uv_tiling.default` from a Layer pointed at by the Reference.
@@ -1131,11 +1211,17 @@ impl<'data> M3File<'data> {
         };
 
         let fits = self.data.len().saturating_sub(start) / file_elem_sz;
-        ensure!(count <= fits, "SEQS: {count} records do not fit in the file");
+        ensure!(
+            count <= fits,
+            "SEQS: {count} records do not fit in the file"
+        );
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             let off = start + i * file_elem_sz;
-            ensure!(off + file_elem_sz <= self.data.len(), "SEQS[{i}] out of bounds");
+            ensure!(
+                off + file_elem_sz <= self.data.len(),
+                "SEQS[{i}] out of bounds"
+            );
             let raw = &self.data[off..off + file_elem_sz];
             let mut buf = [0u8; std::mem::size_of::<Seqs>()];
             if version == 1 {
@@ -1143,8 +1229,7 @@ impl<'data> M3File<'data> {
                 buf[..52].copy_from_slice(&raw[..52]);
                 buf[52..our_sz].copy_from_slice(&raw[56..56 + (our_sz - 52)]);
             } else {
-                buf[..our_sz.min(file_elem_sz)]
-                    .copy_from_slice(&raw[..our_sz.min(file_elem_sz)]);
+                buf[..our_sz.min(file_elem_sz)].copy_from_slice(&raw[..our_sz.min(file_elem_sz)]);
             }
             let s: Seqs = bytemuck::pod_read_unaligned(&buf);
             out.push(s);
@@ -1182,7 +1267,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_u32(&self, r: &Reference) -> Result<Vec<u32>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<u32>(r)
     }
 
@@ -1192,7 +1279,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_i32(&self, r: &Reference) -> Result<Vec<i32>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<i32>(r)
     }
 
@@ -1202,7 +1291,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_vec3(&self, r: &Reference) -> Result<Vec<Vec3>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Vec3>(r)
     }
 
@@ -1212,7 +1303,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_quat(&self, r: &Reference) -> Result<Vec<Quat>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Quat>(r)
     }
 
@@ -1222,7 +1315,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sd2v(&self, r: &Reference) -> Result<Vec<Sd2v>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sd2v>(r)
     }
 
@@ -1232,7 +1327,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_vec2(&self, r: &Reference) -> Result<Vec<Vec2>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Vec2>(r)
     }
 
@@ -1242,7 +1339,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sd3v(&self, r: &Reference) -> Result<Vec<Sd3v>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sd3v>(r)
     }
 
@@ -1252,7 +1351,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sds6(&self, r: &Reference) -> Result<Vec<Sds6>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sds6>(r)
     }
 
@@ -1262,7 +1363,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sdu6(&self, r: &Reference) -> Result<Vec<Sdu6>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sdu6>(r)
     }
 
@@ -1272,7 +1375,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_i16(&self, r: &Reference) -> Result<Vec<i16>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<i16>(r)
     }
 
@@ -1282,7 +1387,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_u16(&self, r: &Reference) -> Result<Vec<u16>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<u16>(r)
     }
 
@@ -1292,7 +1399,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sdr3(&self, r: &Reference) -> Result<Vec<Sdr3>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sdr3>(r)
     }
 
@@ -1302,7 +1411,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_ref_f32(&self, r: &Reference) -> Result<Vec<f32>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<f32>(r)
     }
 
@@ -1312,7 +1423,9 @@ impl<'data> M3File<'data> {
     ///
     /// The reference points past the tag table, or its records run past the end of the file.
     pub fn read_sd4q(&self, r: &Reference) -> Result<Vec<Sd4q>> {
-        if r.entries == 0 { return Ok(Vec::new()); }
+        if r.entries == 0 {
+            return Ok(Vec::new());
+        }
         self.read_ref_slice::<Sd4q>(r)
     }
 

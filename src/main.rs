@@ -20,7 +20,12 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 fn init_tracing(verbosity: &str) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(verbosity));
     tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr).with_target(false).compact())
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(false)
+                .compact(),
+        )
         .with(filter)
         .init();
 }
@@ -42,7 +47,10 @@ fn map(path: &str) -> Result<memmap2::Mmap> {
 /// Use the model's own directory as the texture root when `-t` is not given and
 /// it holds any image files.
 fn auto_texture_dir(input: &str) -> Option<String> {
-    let dir = Path::new(input).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let dir = Path::new(input)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let has_textures = std::fs::read_dir(dir).ok()?.flatten().any(|e| {
         e.path()
             .extension()
@@ -54,7 +62,10 @@ fn auto_texture_dir(input: &str) -> Option<String> {
 
 fn run(cli: &Cli, input: &str) -> Result<()> {
     let output = cli.output.clone().unwrap_or_else(|| {
-        Path::new(input).with_extension("glb").to_string_lossy().into_owned()
+        Path::new(input)
+            .with_extension("glb")
+            .to_string_lossy()
+            .into_owned()
     });
 
     let texture_dir = cli.textures.clone().or_else(|| {
@@ -68,13 +79,17 @@ fn run(cli: &Cli, input: &str) -> Result<()> {
     };
 
     let model = map(input)?;
-    let anims = cli.anims.iter().map(|p| map(p)).collect::<Result<Vec<_>>>()?;
+    let anims = cli
+        .anims
+        .iter()
+        .map(|p| map(p))
+        .collect::<Result<Vec<_>>>()?;
 
     let mut converter = Converter::new().textures(&textures).options(PackOptions {
-        ktx2:         cli.ktx2,
-        bevy_compat:  cli.bevy_compat,
+        ktx2: cli.ktx2,
+        bevy_compat: cli.bevy_compat,
         max_tex_size: cli.max_tex_size,
-        fx:           !cli.no_fx,
+        fx: !cli.no_fx,
     });
     for a in &anims {
         converter = converter.animations(a);
@@ -85,7 +100,8 @@ fn run(cli: &Cli, input: &str) -> Result<()> {
 
     if !cli.quiet {
         let s = glb.stats;
-        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
         anstream::println!(
             "{}",
             cformat!(
@@ -106,11 +122,20 @@ fn main() {
     let cli = Cli::parse();
 
     if let Some(shell) = cli.completions {
-        clap_complete::generate(shell, &mut Cli::command(), "m3-to-glb", &mut std::io::stdout());
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "m3-to-glb",
+            &mut std::io::stdout(),
+        );
         return;
     }
 
-    init_tracing(if cli.quiet { "error" } else { cli.verbose.as_str() });
+    init_tracing(if cli.quiet {
+        "error"
+    } else {
+        cli.verbose.as_str()
+    });
 
     // clap guarantees INPUT whenever --completions is absent.
     let input = cli.input.as_deref().unwrap_or_default();

@@ -55,23 +55,23 @@ pub struct MaterialResolve {
     /// `"<path>.glb#Texture{n}"`.
     pub texture: Option<usize>,
     /// Blend mode name: `"opaque"`, `"blend"`, `"add"` or `"multiply"`.
-    pub blend:   &'static str,
+    pub blend: &'static str,
     /// Flat colour of a textureless (colour-layer) material, if any.
-    pub color:   Option<[f32; 4]>,
+    pub color: Option<[f32; 4]>,
     /// The emissive layer's bitmap, when the material carries one distinct from
     /// [`texture`](Self::texture): the glow drawn over the diffuse.
     pub emissive: Option<usize>,
     /// How that layer composites: `"add"`, `"blend"` or `"multiply"`.
     pub emissive_blend: &'static str,
     /// Where [`texture`](Self::texture) is read: written beside it.
-    pub uv:      Option<LayerUv>,
+    pub uv: Option<LayerUv>,
     /// Whether the picture is drawn with its own alpha: its layer reads it, or the
     /// alpha layer names the same bitmap by its alpha. A picture read as RGB is
     /// opaque however much alpha its bitmap carries.
     pub texture_alpha: bool,
     /// The layer that cuts the picture to shape, when it is not simply the
     /// picture's own alpha.
-    pub mask:    Option<MaskResolve>,
+    pub mask: Option<MaskResolve>,
 }
 
 /// Where a material layer reads its bitmap.
@@ -81,7 +81,7 @@ pub struct LayerUv {
     pub tiling: [f32; 2],
     /// Whether it reads the particle's flipbook cell (`uv_source` 6) rather than
     /// the whole quad. Meaningless for a projection, which has no cells.
-    pub cell:   bool,
+    pub cell: bool,
 }
 
 /// An alpha mask: a bitmap read from one channel that scales the opacity of
@@ -94,7 +94,7 @@ pub struct MaskResolve {
     pub channel: &'static str,
     /// Where it is read — usually not where the picture is: a tiling picture cut
     /// by a mask stretched once across the effect.
-    pub uv:      LayerUv,
+    pub uv: LayerUv,
 }
 
 // ─── Collected effects ───────────────────────────────────────────────────────
@@ -102,13 +102,13 @@ pub struct MaskResolve {
 /// One effect, still in M3 terms, with the bone it hangs off.
 pub struct FxItem {
     /// Node name to emit — `PAR0_<bone>`, `LITE0_<bone>`, `PROJ0_<bone>`.
-    pub name:       String,
+    pub name: String,
     /// Bone index; the packer parents the effect node to this bone's node.
-    pub bone:       usize,
+    pub bone: usize,
     /// `MATM` index whose texture/blend the effect draws with, when it has one.
     pub matm_index: Option<usize>,
     /// The effect record itself.
-    pub kind:       FxKind,
+    pub kind: FxKind,
 }
 
 /// The three kinds of effect M3 attaches to bones.
@@ -137,17 +137,25 @@ pub fn collect(m3: &M3File<'_>) -> Vec<FxItem> {
 
     let mut out = Vec::new();
 
-    for (i, par) in m3.particle_systems().unwrap_or_default().into_iter().enumerate() {
+    for (i, par) in m3
+        .particle_systems()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+    {
         let bone = par.bone as usize;
         if bone >= bones.len() {
-            tracing::warn!("PAR_[{i}] references bone {bone} of {} — skipped", bones.len());
+            tracing::warn!(
+                "PAR_[{i}] references bone {bone} of {} — skipped",
+                bones.len()
+            );
             continue;
         }
         out.push(FxItem {
-            name:       format!("PAR{i}_{}", bone_name(bone)),
+            name: format!("PAR{i}_{}", bone_name(bone)),
             bone,
             matm_index: Some(par.material_reference_index as usize),
-            kind:       FxKind::Particle(Box::new(par)),
+            kind: FxKind::Particle(Box::new(par)),
         });
     }
 
@@ -157,10 +165,10 @@ pub fn collect(m3: &M3File<'_>) -> Vec<FxItem> {
             continue;
         }
         out.push(FxItem {
-            name:       format!("LITE{i}_{}", bone_name(bone)),
+            name: format!("LITE{i}_{}", bone_name(bone)),
             bone,
             matm_index: None,
-            kind:       FxKind::Light(Box::new(lite)),
+            kind: FxKind::Light(Box::new(lite)),
         });
     }
 
@@ -170,10 +178,10 @@ pub fn collect(m3: &M3File<'_>) -> Vec<FxItem> {
             continue;
         }
         out.push(FxItem {
-            name:       format!("PROJ{i}_{}", bone_name(bone)),
+            name: format!("PROJ{i}_{}", bone_name(bone)),
             bone,
             matm_index: Some(proj.material_reference_index as usize),
-            kind:       FxKind::Decal(Box::new(proj)),
+            kind: FxKind::Decal(Box::new(proj)),
         });
     }
 
@@ -212,8 +220,9 @@ impl FxItem {
 // ─── Particle systems ────────────────────────────────────────────────────────
 
 /// `emit_shape` — m3studio `bl_enum.particle_shape`.
-const EMIT_SHAPES: [&str; 8] =
-    ["point", "plane", "sphere", "cube", "cylinder", "disc", "spline", "mesh"];
+const EMIT_SHAPES: [&str; 8] = [
+    "point", "plane", "sphere", "cube", "cylinder", "disc", "spline", "mesh",
+];
 
 /// `emit_type` — m3studio `bl_enum.particle_emit_type`.
 const EMIT_TYPES: [&str; 5] = ["constant", "radial", "zaxis", "random", "mesh"];
@@ -271,16 +280,27 @@ fn spawn_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
     // sequence; taking the default alone yields an emitter that emits nothing.
     let rate_curves = curves.real(p.emit_rate.header.id);
     let burst = curves::peak_window(&rate_curves);
-    let rate = burst.map_or(p.emit_rate.default, |(peak, _, _)| peak.max(p.emit_rate.default))
+    let rate = burst
+        .map_or(p.emit_rate.default, |(peak, _, _)| {
+            peak.max(p.emit_rate.default)
+        })
         .max(0.0);
 
     // Capacity: what the runtime has to allocate. M3's `emit_max` is the
     // emitter's own cap; when it is unset, the steady state of rate × lifetime
     // is the honest number. Clamped so one bad field cannot ask for a
     // million-particle buffer.
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to 1..=65536 first")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to 1..=65536 first"
+    )]
     let steady = (rate * lifespan * 1.25).ceil().clamp(1.0, 65536.0) as u32;
-    let capacity = if p.emit_max > 0 { p.emit_max.min(65536) } else { steady };
+    let capacity = if p.emit_max > 0 {
+        p.emit_max.min(65536)
+    } else {
+        steady
+    };
     j.int("capacity", u64::from(capacity.clamp(4, 65536)));
 
     // ── spawning ─────────────────────────────────────────────────────────────
@@ -292,13 +312,16 @@ fn spawn_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
     {
         let mut s = Obj::new();
         s.num("rate", rate);
-        let burst_count = count_peak
-            .map_or(f32::from(p.emit_count.default), |(peak, _, _)| {
-                peak.max(f32::from(p.emit_count.default))
-            });
+        let burst_count = count_peak.map_or(f32::from(p.emit_count.default), |(peak, _, _)| {
+            peak.max(f32::from(p.emit_count.default))
+        });
         if burst_count > 0.0 {
             // A 16-bit track: positive and at most 65535 here.
-            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "positive, from a 16-bit track")]
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "positive, from a 16-bit track"
+            )]
             s.int("burst", burst_count as u64);
         }
         if p.emit_max > 0 {
@@ -322,7 +345,11 @@ fn spawn_json(j: &mut Obj, p: &Par, curves: &FxCurves) {
 
     j.raw(
         "lifetime",
-        &pair(lifespan, p.lifespan_random.default, p.additional_flags & AF_LIFESPAN_RANDOMIZE != 0),
+        &pair(
+            lifespan,
+            p.lifespan_random.default,
+            p.additional_flags & AF_LIFESPAN_RANDOMIZE != 0,
+        ),
     );
     j.raw(
         "speed",
@@ -370,7 +397,10 @@ fn emission_json(j: &mut Obj, p: &Par) {
         j.num("drag", p.drag);
     }
     if p.mass != 0.0 || p.mass2 != 0.0 {
-        j.raw("mass", &pair(p.mass, p.mass2, p.additional_flags & AF_MASS_RANDOMIZE != 0));
+        j.raw(
+            "mass",
+            &pair(p.mass, p.mass2, p.additional_flags & AF_MASS_RANDOMIZE != 0),
+        );
     }
     if p.noise_amplitude != 0.0 {
         let mut s = Obj::new();
@@ -417,7 +447,11 @@ fn over_lifetime_json(j: &mut Obj, p: &Par) {
     j.raw(
         "color",
         &gradient4(
-            [p.color_init.default, p.color_mid.default, p.color_end.default],
+            [
+                p.color_init.default,
+                p.color_mid.default,
+                p.color_end.default,
+            ],
             p.color_anim_mid,
             p.alpha_anim_mid,
             (p.color_randomize != 0 || p.alpha_randomize != 0).then_some([
@@ -455,8 +489,17 @@ fn look_json(j: &mut Obj, p: &Par) {
         s.int("rows", u64::from(p.uv_flipbook_rows));
         // Start frame is picked from [start_init, start_stop], then advances to
         // a frame in [end_init, end_stop] over `lifespan_factor` of the life.
-        s.vec2i("start", [p.uv_flipbook_start_init_index, p.uv_flipbook_start_stop_index]);
-        s.vec2i("end", [p.uv_flipbook_end_init_index, p.uv_flipbook_end_stop_index]);
+        s.vec2i(
+            "start",
+            [
+                p.uv_flipbook_start_init_index,
+                p.uv_flipbook_start_stop_index,
+            ],
+        );
+        s.vec2i(
+            "end",
+            [p.uv_flipbook_end_init_index, p.uv_flipbook_end_stop_index],
+        );
         if p.uv_flipbook_start_lifespan_factor != 0.0 {
             s.num("lifespan_factor", p.uv_flipbook_start_lifespan_factor);
         }
@@ -470,9 +513,23 @@ fn look_json(j: &mut Obj, p: &Par) {
 /// Simulation space, sorting, collision and pass-through flags.
 fn simulation_json(j: &mut Obj, p: &Par) {
     // ── simulation ───────────────────────────────────────────────────────────
-    j.string("space", if p.additional_flags & AF_WORLD_SPACE != 0 { "world" } else { "local" });
+    j.string(
+        "space",
+        if p.additional_flags & AF_WORLD_SPACE != 0 {
+            "world"
+        } else {
+            "local"
+        },
+    );
     if p.flags & (F_SORT_DISTANCE | F_SORT_HEIGHT) != 0 {
-        j.string("sort", if p.flags & F_SORT_HEIGHT != 0 { "height" } else { "distance" });
+        j.string(
+            "sort",
+            if p.flags & F_SORT_HEIGHT != 0 {
+                "height"
+            } else {
+                "distance"
+            },
+        );
     }
     if p.flags & (F_COLLIDE_TERRAIN | F_COLLIDE_OBJECTS) != 0 {
         let mut s = Obj::new();
@@ -595,13 +652,23 @@ const PROJ_LASTING: u32 = 0x4;
 fn decal_json(p: &Proj, mat: &MaterialResolve) -> String {
     let mut j = Obj::new();
     j.string("kind", "decal");
-    j.string("projection", if p.projection_type == 0 { "perspective" } else { "ortho" });
+    j.string(
+        "projection",
+        if p.projection_type == 0 {
+            "perspective"
+        } else {
+            "ortho"
+        },
+    );
     // The projection box, in bone-local units.
-    j.vec3("size", [
-        p.box_offset_x_right.default - p.box_offset_x_left.default,
-        p.box_offset_y_back.default - p.box_offset_y_front.default,
-        p.box_offset_z_top.default - p.box_offset_z_bottom.default,
-    ]);
+    j.vec3(
+        "size",
+        [
+            p.box_offset_x_right.default - p.box_offset_x_left.default,
+            p.box_offset_y_back.default - p.box_offset_y_front.default,
+            p.box_offset_z_top.default - p.box_offset_z_bottom.default,
+        ],
+    );
     if p.pitch.default != 0.0 || p.yaw.default != 0.0 || p.roll.default != 0.0 {
         j.vec3("euler", [p.pitch.default, p.yaw.default, p.roll.default]);
     }
@@ -686,10 +753,19 @@ fn gradient1(v: [f32; 3], mid_at: f32, randomize: bool, v2: [f32; 3]) -> String 
     let mut j = Obj::new();
     j.raw(
         "keys",
-        &format!("[[0,{}],[{},{}],[1,{}]]", num(v[0]), num(mid_at), num(v[1]), num(v[2])),
+        &format!(
+            "[[0,{}],[{},{}],[1,{}]]",
+            num(v[0]),
+            num(mid_at),
+            num(v[1]),
+            num(v[2])
+        ),
     );
     if randomize {
-        j.raw("random", &format!("[{},{},{}]", num(v2[0]), num(v2[1]), num(v2[2])));
+        j.raw(
+            "random",
+            &format!("[{},{},{}]", num(v2[0]), num(v2[1]), num(v2[2])),
+        );
     }
     j.finish()
 }
@@ -699,12 +775,24 @@ fn gradient1(v: [f32; 3], mid_at: f32, randomize: bool, v2: [f32; 3]) -> String 
 fn gradient4(c: [Col; 3], mid_at: f32, alpha_mid_at: f32, c2: Option<[Col; 3]>) -> String {
     let mid_at = mid_at.clamp(0.0, 1.0);
     let mut j = Obj::new();
-    j.raw("keys", &format!("[[0,{}],[{},{}],[1,{}]]", col(c[0]), num(mid_at), col(c[1]), col(c[2])));
+    j.raw(
+        "keys",
+        &format!(
+            "[[0,{}],[{},{}],[1,{}]]",
+            col(c[0]),
+            num(mid_at),
+            col(c[1]),
+            col(c[2])
+        ),
+    );
     if (alpha_mid_at - mid_at).abs() > 1e-6 {
         j.num("alpha_mid", alpha_mid_at.clamp(0.0, 1.0));
     }
     if let Some(c2) = c2 {
-        j.raw("random", &format!("[{},{},{}]", col(c2[0]), col(c2[1]), col(c2[2])));
+        j.raw(
+            "random",
+            &format!("[{},{},{}]", col(c2[0]), col(c2[1]), col(c2[2])),
+        );
     }
     j.finish()
 }
@@ -727,13 +815,23 @@ fn pick(table: &[&'static str], i: u32) -> &'static str {
 
 /// Replace a non-positive or non-finite value with a sane fallback.
 fn nz(v: f32, fallback: f32) -> f32 {
-    if v.is_finite() && v > 0.0 { v } else { fallback }
+    if v.is_finite() && v > 0.0 {
+        v
+    } else {
+        fallback
+    }
 }
 
 /// Bone names come from the file and end up in a glTF node name; keep them to
 /// characters that survive a JSON string and read well in an engine's hierarchy.
 fn sanitize(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

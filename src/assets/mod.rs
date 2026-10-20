@@ -29,7 +29,9 @@ pub struct TextureCache {
 
 impl std::fmt::Debug for TextureCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TextureCache").field("textures", &self.map.len()).finish_non_exhaustive()
+        f.debug_struct("TextureCache")
+            .field("textures", &self.map.len())
+            .finish_non_exhaustive()
     }
 }
 

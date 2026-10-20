@@ -27,7 +27,10 @@ fn bone_trs(bone: &Bone, index: usize) -> ([f32; 3], [f32; 4], [f32; 3]) {
     let s = bone.scale.default;
     let (t, r) = ([t.x, t.y, t.z], [r.x, r.y, r.z, r.w]);
     let (t, r) = if bone.parent_index(index).is_none() {
-        (quat::rotate(t, quat::Z_UP_TO_Y_UP), quat::mul(quat::Z_UP_TO_Y_UP, r))
+        (
+            quat::rotate(t, quat::Z_UP_TO_Y_UP),
+            quat::mul(quat::Z_UP_TO_Y_UP, r),
+        )
     } else {
         (t, r)
     };
@@ -45,7 +48,10 @@ impl Scene {
             // Two attachments on one bone would fight over one `extras`; the
             // first wins, matching the order the game's own table lists them.
             if attach_extras.contains_key(&a.bone) {
-                warn!("bone {} carries more than one attachment point — kept the first", a.bone);
+                warn!(
+                    "bone {} carries more than one attachment point — kept the first",
+                    a.bone
+                );
             } else {
                 attach_extras.insert(a.bone, a.extras_json());
             }
@@ -65,7 +71,11 @@ impl Scene {
                 // War3_Kelthuzad's root), which glTF rejects.
                 let r = quat::normalize_and_clamp(r);
                 GltfNode {
-                    name: Some(if name.is_empty() { format!("bone_{bi}") } else { name.to_owned() }),
+                    name: Some(if name.is_empty() {
+                        format!("bone_{bi}")
+                    } else {
+                        name.to_owned()
+                    }),
                     translation: Some(t),
                     rotation: Some(r),
                     scale: Some(s),
@@ -81,7 +91,12 @@ impl Scene {
                 None => bone_roots.push(bi),
             }
         }
-        Self { nodes, bone_count: bones.len(), bone_roots, mesh_nodes: Vec::new() }
+        Self {
+            nodes,
+            bone_count: bones.len(),
+            bone_roots,
+            mesh_nodes: Vec::new(),
+        }
     }
 
     /// One empty node per effect, parented to the bone it rides, carrying its
@@ -96,7 +111,11 @@ impl Scene {
     ) {
         // `fx::collect` already dropped effects on bones past the end.
         for item in items.iter().filter(|it| it.bone < self.bone_count) {
-            let mat = item.matm_index.and_then(|i| materials.get(&i)).copied().unwrap_or_default();
+            let mat = item
+                .matm_index
+                .and_then(|i| materials.get(&i))
+                .copied()
+                .unwrap_or_default();
             self.nodes.push(GltfNode {
                 name: Some(item.name.clone()),
                 translation: item.translation(),
@@ -114,7 +133,11 @@ impl Scene {
         for (i, &is_skinned) in skinned.iter().enumerate() {
             self.mesh_nodes.push(self.nodes.len());
             self.nodes.push(GltfNode {
-                name: Some(if i == 0 { "mesh".into() } else { format!("mesh_{i}") }),
+                name: Some(if i == 0 {
+                    "mesh".into()
+                } else {
+                    format!("mesh_{i}")
+                }),
                 mesh: Some(i),
                 skin: if is_skinned { skin } else { None },
                 ..GltfNode::default()
@@ -166,7 +189,10 @@ pub(super) fn skin(bufs: &mut Buffers, bones: &[Bone]) -> GltfSkin {
     });
     // No `skeleton`: it is optional, and naming one trips
     // SKIN_SKELETON_INVALID when there are multiple bone roots.
-    GltfSkin { joints: (0..bones.len()).collect(), inverse_bind_matrices: Some(ibm) }
+    GltfSkin {
+        joints: (0..bones.len()).collect(),
+        inverse_bind_matrices: Some(ibm),
+    }
 }
 
 // ─── Bone bind pose → IBM ─────────────────────────────────────────────────────
@@ -191,12 +217,21 @@ fn compute_world_matrices(bones: &[Bone]) -> Vec<[[f32; 4]; 4]> {
     world
 }
 
-#[expect(clippy::many_single_char_names, reason = "the textbook quaternion-to-matrix names")]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the textbook quaternion-to-matrix names"
+)]
 fn trs_to_mat4(t: [f32; 3], q: [f32; 4], s: [f32; 3]) -> [[f32; 4]; 4] {
     let (x, y, z, w) = (q[0], q[1], q[2], q[3]);
-    let xx = x * x; let yy = y * y; let zz = z * z;
-    let xy = x * y; let xz = x * z; let yz = y * z;
-    let wx = w * x; let wy = w * y; let wz = w * z;
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let xy = x * y;
+    let xz = x * z;
+    let yz = y * z;
+    let wx = w * x;
+    let wy = w * y;
+    let wz = w * z;
 
     let r00 = 1.0 - 2.0 * (yy + zz);
     let r01 = 2.0 * (xy - wz);
@@ -212,7 +247,7 @@ fn trs_to_mat4(t: [f32; 3], q: [f32; 4], s: [f32; 3]) -> [[f32; 4]; 4] {
         [r00 * s[0], r10 * s[0], r20 * s[0], 0.0],
         [r01 * s[1], r11 * s[1], r21 * s[1], 0.0],
         [r02 * s[2], r12 * s[2], r22 * s[2], 0.0],
-        [t[0],       t[1],       t[2],       1.0],
+        [t[0], t[1], t[2], 1.0],
     ]
 }
 
@@ -220,7 +255,13 @@ fn trs_to_mat4(t: [f32; 3], q: [f32; 4], s: [f32; 3]) -> [[f32; 4]; 4] {
 fn mul_4x4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     // Column `c` of the product is `a` applied to column `c` of `b`; the dot
     // product sums in k order from +0.0, exactly as the scalar loop did.
-    b.map(|b_col| std::array::from_fn(|r| a.iter().zip(b_col).fold(0.0, |s, (a_col, bk)| s + a_col[r] * bk)))
+    b.map(|b_col| {
+        std::array::from_fn(|r| {
+            a.iter()
+                .zip(b_col)
+                .fold(0.0, |s, (a_col, bk)| s + a_col[r] * bk)
+        })
+    })
 }
 
 /// General 4×4 matrix inversion via cofactor expansion. Operates on column-major
@@ -228,33 +269,79 @@ fn mul_4x4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
 fn invert_4x4(m: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     // Flatten to row-major for cofactor math, then transpose at the end.
     let a = [
-        m[0][0], m[1][0], m[2][0], m[3][0],
-        m[0][1], m[1][1], m[2][1], m[3][1],
-        m[0][2], m[1][2], m[2][2], m[3][2],
-        m[0][3], m[1][3], m[2][3], m[3][3],
+        m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1], m[0][2], m[1][2],
+        m[2][2], m[3][2], m[0][3], m[1][3], m[2][3], m[3][3],
     ];
     let mut inv = [0.0f32; 16];
-    inv[0]  =  a[5]*a[10]*a[15] - a[5]*a[11]*a[14] - a[9]*a[6]*a[15] + a[9]*a[7]*a[14] + a[13]*a[6]*a[11] - a[13]*a[7]*a[10];
-    inv[4]  = -a[4]*a[10]*a[15] + a[4]*a[11]*a[14] + a[8]*a[6]*a[15] - a[8]*a[7]*a[14] - a[12]*a[6]*a[11] + a[12]*a[7]*a[10];
-    inv[8]  =  a[4]*a[9]*a[15]  - a[4]*a[11]*a[13] - a[8]*a[5]*a[15] + a[8]*a[7]*a[13] + a[12]*a[5]*a[11] - a[12]*a[7]*a[9];
-    inv[12] = -a[4]*a[9]*a[14]  + a[4]*a[10]*a[13] + a[8]*a[5]*a[14] - a[8]*a[6]*a[13] - a[12]*a[5]*a[10] + a[12]*a[6]*a[9];
+    inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15]
+        + a[9] * a[7] * a[14]
+        + a[13] * a[6] * a[11]
+        - a[13] * a[7] * a[10];
+    inv[4] = -a[4] * a[10] * a[15] + a[4] * a[11] * a[14] + a[8] * a[6] * a[15]
+        - a[8] * a[7] * a[14]
+        - a[12] * a[6] * a[11]
+        + a[12] * a[7] * a[10];
+    inv[8] = a[4] * a[9] * a[15] - a[4] * a[11] * a[13] - a[8] * a[5] * a[15]
+        + a[8] * a[7] * a[13]
+        + a[12] * a[5] * a[11]
+        - a[12] * a[7] * a[9];
+    inv[12] = -a[4] * a[9] * a[14] + a[4] * a[10] * a[13] + a[8] * a[5] * a[14]
+        - a[8] * a[6] * a[13]
+        - a[12] * a[5] * a[10]
+        + a[12] * a[6] * a[9];
 
-    inv[1]  = -a[1]*a[10]*a[15] + a[1]*a[11]*a[14] + a[9]*a[2]*a[15] - a[9]*a[3]*a[14] - a[13]*a[2]*a[11] + a[13]*a[3]*a[10];
-    inv[5]  =  a[0]*a[10]*a[15] - a[0]*a[11]*a[14] - a[8]*a[2]*a[15] + a[8]*a[3]*a[14] + a[12]*a[2]*a[11] - a[12]*a[3]*a[10];
-    inv[9]  = -a[0]*a[9]*a[15]  + a[0]*a[11]*a[13] + a[8]*a[1]*a[15] - a[8]*a[3]*a[13] - a[12]*a[1]*a[11] + a[12]*a[3]*a[9];
-    inv[13] =  a[0]*a[9]*a[14]  - a[0]*a[10]*a[13] - a[8]*a[1]*a[14] + a[8]*a[2]*a[13] + a[12]*a[1]*a[10] - a[12]*a[2]*a[9];
+    inv[1] = -a[1] * a[10] * a[15] + a[1] * a[11] * a[14] + a[9] * a[2] * a[15]
+        - a[9] * a[3] * a[14]
+        - a[13] * a[2] * a[11]
+        + a[13] * a[3] * a[10];
+    inv[5] = a[0] * a[10] * a[15] - a[0] * a[11] * a[14] - a[8] * a[2] * a[15]
+        + a[8] * a[3] * a[14]
+        + a[12] * a[2] * a[11]
+        - a[12] * a[3] * a[10];
+    inv[9] = -a[0] * a[9] * a[15] + a[0] * a[11] * a[13] + a[8] * a[1] * a[15]
+        - a[8] * a[3] * a[13]
+        - a[12] * a[1] * a[11]
+        + a[12] * a[3] * a[9];
+    inv[13] = a[0] * a[9] * a[14] - a[0] * a[10] * a[13] - a[8] * a[1] * a[14]
+        + a[8] * a[2] * a[13]
+        + a[12] * a[1] * a[10]
+        - a[12] * a[2] * a[9];
 
-    inv[2]  =  a[1]*a[6]*a[15]  - a[1]*a[7]*a[14]  - a[5]*a[2]*a[15] + a[5]*a[3]*a[14] + a[13]*a[2]*a[7]  - a[13]*a[3]*a[6];
-    inv[6]  = -a[0]*a[6]*a[15]  + a[0]*a[7]*a[14]  + a[4]*a[2]*a[15] - a[4]*a[3]*a[14] - a[12]*a[2]*a[7]  + a[12]*a[3]*a[6];
-    inv[10] =  a[0]*a[5]*a[15]  - a[0]*a[7]*a[13]  - a[4]*a[1]*a[15] + a[4]*a[3]*a[13] + a[12]*a[1]*a[7]  - a[12]*a[3]*a[5];
-    inv[14] = -a[0]*a[5]*a[14]  + a[0]*a[6]*a[13]  + a[4]*a[1]*a[14] - a[4]*a[2]*a[13] - a[12]*a[1]*a[6]  + a[12]*a[2]*a[5];
+    inv[2] = a[1] * a[6] * a[15] - a[1] * a[7] * a[14] - a[5] * a[2] * a[15]
+        + a[5] * a[3] * a[14]
+        + a[13] * a[2] * a[7]
+        - a[13] * a[3] * a[6];
+    inv[6] = -a[0] * a[6] * a[15] + a[0] * a[7] * a[14] + a[4] * a[2] * a[15]
+        - a[4] * a[3] * a[14]
+        - a[12] * a[2] * a[7]
+        + a[12] * a[3] * a[6];
+    inv[10] = a[0] * a[5] * a[15] - a[0] * a[7] * a[13] - a[4] * a[1] * a[15]
+        + a[4] * a[3] * a[13]
+        + a[12] * a[1] * a[7]
+        - a[12] * a[3] * a[5];
+    inv[14] = -a[0] * a[5] * a[14] + a[0] * a[6] * a[13] + a[4] * a[1] * a[14]
+        - a[4] * a[2] * a[13]
+        - a[12] * a[1] * a[6]
+        + a[12] * a[2] * a[5];
 
-    inv[3]  = -a[1]*a[6]*a[11]  + a[1]*a[7]*a[10]  + a[5]*a[2]*a[11] - a[5]*a[3]*a[10] - a[9]*a[2]*a[7]   + a[9]*a[3]*a[6];
-    inv[7]  =  a[0]*a[6]*a[11]  - a[0]*a[7]*a[10]  - a[4]*a[2]*a[11] + a[4]*a[3]*a[10] + a[8]*a[2]*a[7]   - a[8]*a[3]*a[6];
-    inv[11] = -a[0]*a[5]*a[11]  + a[0]*a[7]*a[9]   + a[4]*a[1]*a[11] - a[4]*a[3]*a[9]  - a[8]*a[1]*a[7]   + a[8]*a[3]*a[5];
-    inv[15] =  a[0]*a[5]*a[10]  - a[0]*a[6]*a[9]   - a[4]*a[1]*a[10] + a[4]*a[2]*a[9]  + a[8]*a[1]*a[6]   - a[8]*a[2]*a[5];
+    inv[3] = -a[1] * a[6] * a[11] + a[1] * a[7] * a[10] + a[5] * a[2] * a[11]
+        - a[5] * a[3] * a[10]
+        - a[9] * a[2] * a[7]
+        + a[9] * a[3] * a[6];
+    inv[7] = a[0] * a[6] * a[11] - a[0] * a[7] * a[10] - a[4] * a[2] * a[11]
+        + a[4] * a[3] * a[10]
+        + a[8] * a[2] * a[7]
+        - a[8] * a[3] * a[6];
+    inv[11] = -a[0] * a[5] * a[11] + a[0] * a[7] * a[9] + a[4] * a[1] * a[11]
+        - a[4] * a[3] * a[9]
+        - a[8] * a[1] * a[7]
+        + a[8] * a[3] * a[5];
+    inv[15] = a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10]
+        + a[4] * a[2] * a[9]
+        + a[8] * a[1] * a[6]
+        - a[8] * a[2] * a[5];
 
-    let det = a[0]*inv[0] + a[1]*inv[4] + a[2]*inv[8] + a[3]*inv[12];
+    let det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
     if det.abs() < 1e-12 {
         return [
             [1.0, 0.0, 0.0, 0.0],
@@ -264,15 +351,17 @@ fn invert_4x4(m: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
         ];
     }
     let inv_det = 1.0 / det;
-    for v in &mut inv { *v *= inv_det; }
+    for v in &mut inv {
+        *v *= inv_det;
+    }
     // Convert back to column-major: out[col][row] = inv[row*4 + col].
     // Bone TRS produce affine matrices: bottom row is exactly [0,0,0,1].
     // Float precision in the cofactor inversion drifts that, so we snap it
     // — required by the glTF validator (ACCESSOR_INVALID_IBM otherwise).
     [
-        [inv[0],  inv[4],  inv[8],  0.0],
-        [inv[1],  inv[5],  inv[9],  0.0],
-        [inv[2],  inv[6],  inv[10], 0.0],
-        [inv[3],  inv[7],  inv[11], 1.0],
+        [inv[0], inv[4], inv[8], 0.0],
+        [inv[1], inv[5], inv[9], 0.0],
+        [inv[2], inv[6], inv[10], 0.0],
+        [inv[3], inv[7], inv[11], 1.0],
     ]
 }

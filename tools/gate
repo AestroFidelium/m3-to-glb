@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# The quality gate. Nothing is committed that fails it.
+#
+#   tools/gate quick   fmt + clippy + nextest                         (pre-commit hook runs this)
+#   tools/gate all     quick + library-only clippy + docs + doctests + deny + machete + typos
+#                      + nix lints
+#                      (before merging to main; a superset of .github/workflows/ci.yml)
+#   tools/gate cov     branch coverage report (cargo llvm-cov nextest --branch) → target/llvm-cov/html
+#
+# Runs inside the nix dev shell; re-enters it when called from outside (e.g. a git hook).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if [[ -z "${IN_NIX_SHELL:-}" ]]; then
+  exec nix develop --quiet -c "$0" "$@"
+fi
+
+step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+
+quick() {
+  step "fmt";    cargo fmt --all --check
+  step "clippy"; cargo clippy --all-targets --all-features --quiet -- -D warnings
+  step "tests";  cargo nextest run --all-features --status-level fail --final-status-level fail
+}
+
+all() {
+  quick
+  # The library is published without the `cli` feature: it must stand on its own.
+  step "clippy (lib, no default features)"; cargo clippy --lib --no-default-features --quiet -- -D warnings
+  step "docs";     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features --quiet
+  step "doctests"; cargo test --doc --all-features --quiet
+  step "deny";     cargo deny --log-level error check
+  step "machete";  cargo machete
+  step "typos";    typos
+  step "nix";      nixfmt --check flake.nix && statix check . && deadnix --fail .
+}
+
+cov() {
+  # Coverage instrumentation needs the LLVM backend; the dev profile uses cranelift.
+  CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo llvm-cov nextest --all-features --branch --html
+}
+
+case "${1:-quick}" in
+  quick) quick ;;
+  all) all ;;
+  cov) cov ;;
+  *) echo "usage: tools/gate [quick|all|cov]" >&2; exit 2 ;;
+esac
+step "gate ${1:-quick}: green"

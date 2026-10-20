@@ -86,12 +86,21 @@ fn verbose_logging_and_external_tools() {
     {
         let tex = tempfile::tempdir().unwrap();
         for name in ["quad_diff.png", "quad_norm.png", "quad_ao.png"] {
-            image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 200, 30, 90])).save(tex.path().join(name)).unwrap();
+            image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 200, 30, 90]))
+                .save(tex.path().join(name))
+                .unwrap();
         }
         let cache = TextureCache::build(tex.path().to_str().unwrap()).unwrap();
         let mut spec = ModelSpec::quad();
-        let layer = |p: &str| LayerSpec { texture: p.into(), ..LayerSpec::default() };
-        spec.materials[0].layers = vec![("diff", layer("quad_diff.dds")), ("norm", layer("quad_norm.dds")), ("ao", layer("quad_ao.dds"))];
+        let layer = |p: &str| LayerSpec {
+            texture: p.into(),
+            ..LayerSpec::default()
+        };
+        spec.materials[0].layers = vec![
+            ("diff", layer("quad_diff.dds")),
+            ("norm", layer("quad_norm.dds")),
+            ("ao", layer("quad_ao.dds")),
+        ];
 
         let tools = tempfile::tempdir().unwrap();
         let old_path = std::env::var_os("PATH").unwrap_or_default();
@@ -103,15 +112,24 @@ fn verbose_logging_and_external_tools() {
         unsafe { std::env::set_var("PATH", &path) };
 
         let mimes = |bevy: bool, max: u32| {
-            let c = Converter::new().textures(&cache).ktx2(true).max_texture_size(max).options(m3_to_glb::PackOptions {
-                ktx2: true,
-                bevy_compat: bevy,
-                max_tex_size: max,
-                fx: true,
-            });
+            let c = Converter::new()
+                .textures(&cache)
+                .ktx2(true)
+                .max_texture_size(max)
+                .options(m3_to_glb::PackOptions {
+                    ktx2: true,
+                    bevy_compat: bevy,
+                    max_tex_size: max,
+                    fx: true,
+                });
             let glb = c.convert(&spec.build()).unwrap();
             let g = check_glb(&glb.bytes).unwrap();
-            let v: Vec<String> = g.json["images"].as_array().unwrap().iter().map(|i| i["mimeType"].as_str().unwrap().to_owned()).collect();
+            let v: Vec<String> = g.json["images"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["mimeType"].as_str().unwrap().to_owned())
+                .collect();
             (v, g.json.get("extensionsRequired").is_some())
         };
 
@@ -120,7 +138,10 @@ fn verbose_logging_and_external_tools() {
         assert!(m.iter().all(|m| m == "image/ktx2"), "{m:?}");
         assert!(required);
         let (_, required) = mimes(true, 64);
-        assert!(!required, "--bevy-compat must not declare KHR_texture_basisu");
+        assert!(
+            !required,
+            "--bevy-compat must not declare KHR_texture_basisu"
+        );
 
         fake_toktx(tools.path(), "fail");
         assert!(mimes(false, 0).0.iter().all(|m| m == "image/png"));

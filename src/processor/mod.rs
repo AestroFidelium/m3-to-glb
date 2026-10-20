@@ -27,14 +27,19 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
         return Ok(Vec::new());
     }
     let divisions = m3.divisions()?;
-    if divisions.is_empty() { return Ok(Vec::new()); }
+    if divisions.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let vertex_data  = m3.vertex_data()?.to_vec();
+    let vertex_data = m3.vertex_data()?.to_vec();
     let vertex_flags = m3.vertex_flags();
-    let stride       = m3.vertex_stride();
-    let offsets      = VertexOffsets::from_flags(vertex_flags);
+    let stride = m3.vertex_stride();
+    let offsets = VertexOffsets::from_flags(vertex_flags);
 
-    debug!("vertex_flags=0x{:08X} stride={} offsets={:?}", vertex_flags, stride, offsets);
+    debug!(
+        "vertex_flags=0x{:08X} stride={} offsets={:?}",
+        vertex_flags, stride, offsets
+    );
 
     // Read material references, bone_lookup, and bones once. `resolved_refs`
     // maps each MATM index to a renderable one, following CMP_ composites to
@@ -42,8 +47,8 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
     // records reference to hide geometry that's off in the rest pose (e.g.
     // Chromie's hourglass, War3 death-gore — shown only by specific animations).
     let resolved_refs = m3.resolved_material_refs();
-    let bone_lookup   = m3.bone_lookup().unwrap_or_default();
-    let bones         = m3.bones().unwrap_or_default();
+    let bone_lookup = m3.bone_lookup().unwrap_or_default();
+    let bones = m3.bones().unwrap_or_default();
 
     // Gather regions / indices / batches sequentially (M3File is not Sync),
     // then convert each Division in parallel via rayon.
@@ -74,7 +79,10 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
         .map(|(div_idx, div)| {
             debug!(
                 "converting Division #{} ({} regions v{}, {} batches)",
-                div_idx, div.regions.len(), div.regn_version, div.batches.len()
+                div_idx,
+                div.regions.len(),
+                div.regn_version,
+                div.batches.len()
             );
             let mut soa = convert_division(&shared, &div)?;
             // M3 stores models Z-up; glTF is Y-up. Bake the -90° rotation
@@ -95,15 +103,15 @@ pub fn convert_all_meshes(m3: &M3File<'_>) -> Result<Vec<MeshDataSoA>> {
 #[derive(Debug, Clone)]
 pub struct VertexOffsets {
     /// Compressed normal + bitangent sign byte (`0x800000`).
-    pub normal:  Option<usize>,
+    pub normal: Option<usize>,
     /// First int16 UV set (`0x20000`).
-    pub uv0:     Option<usize>,
+    pub uv0: Option<usize>,
     /// Second int16 UV set (`0x40000`).
-    pub uv1:     Option<usize>,
+    pub uv1: Option<usize>,
     /// Compressed tangent (`0x1000000`).
     pub tangent: Option<usize>,
     /// Bone weights and lookups (`0x20` / `0x40`).
-    pub skin:    Option<SkinLayout>,
+    pub skin: Option<SkinLayout>,
 }
 
 /// Where a vertex keeps its bone weights and bone-lookup indices.
@@ -114,7 +122,7 @@ pub struct SkinLayout {
     /// Offset of `lookups[0..pairs]` (uint8 each) from the vertex start.
     pub lookups_offset: usize,
     /// Number of weight/lookup pairs per vertex: 2 (skin0 or skin1 only) or 4 (both).
-    pub pairs:          usize,
+    pub pairs: usize,
 }
 
 impl VertexOffsets {
@@ -143,7 +151,7 @@ impl VertexOffsets {
 
         // Skin: weights then lookups, each uint8 per slot.
         let pairs = match (flags & 0x20 != 0, flags & 0x40 != 0) {
-            (true, true)   => 4,
+            (true, true) => 4,
             (true, false) | (false, true) => 2,
             (false, false) => 0,
         };
@@ -151,48 +159,100 @@ impl VertexOffsets {
             let weights_off = off;
             let lookups_off = off + pairs;
             off += pairs * 2;
-            Some(SkinLayout { weights_offset: weights_off, lookups_offset: lookups_off, pairs })
+            Some(SkinLayout {
+                weights_offset: weights_off,
+                lookups_offset: lookups_off,
+                pairs,
+            })
         } else {
             None
         };
 
-        if flags & 0x0000_0080 != 0 { off += 12; }  // normalf (uncompressed normal)
+        if flags & 0x0000_0080 != 0 {
+            off += 12;
+        } // normalf (uncompressed normal)
 
         // Compressed normal (Vector3As3uint8 + sign byte) — RIGHT AFTER skin/normalf,
         // BEFORE color and UVs (m3studio io_m3.py:172-175).
         let normal = if flags & 0x0080_0000 != 0 {
-            let o = off; off += 4; Some(o)
-        } else { None };
+            let o = off;
+            off += 4;
+            Some(o)
+        } else {
+            None
+        };
 
-        if flags & 0x0000_0100 != 0 { off += 4; }   // test100 (before col)
-        if flags & 0x0000_0200 != 0 { off += 4; }   // col
-        if flags & 0x0000_0400 != 0 { off += 4; }   // test400
-        if flags & 0x0000_0800 != 0 { off += 4; }   // test800
-        if flags & 0x0000_1000 != 0 { off += 4; }   // test1000
-        if flags & 0x0000_2000 != 0 { off += 8; }   // fuv0 (Vec2 float)
-        if flags & 0x0000_4000 != 0 { off += 8; }   // fuv1
-        if flags & 0x0000_8000 != 0 { off += 8; }   // fuv2
-        if flags & 0x0001_0000 != 0 { off += 8; }   // fuv3
+        if flags & 0x0000_0100 != 0 {
+            off += 4;
+        } // test100 (before col)
+        if flags & 0x0000_0200 != 0 {
+            off += 4;
+        } // col
+        if flags & 0x0000_0400 != 0 {
+            off += 4;
+        } // test400
+        if flags & 0x0000_0800 != 0 {
+            off += 4;
+        } // test800
+        if flags & 0x0000_1000 != 0 {
+            off += 4;
+        } // test1000
+        if flags & 0x0000_2000 != 0 {
+            off += 8;
+        } // fuv0 (Vec2 float)
+        if flags & 0x0000_4000 != 0 {
+            off += 8;
+        } // fuv1
+        if flags & 0x0000_8000 != 0 {
+            off += 8;
+        } // fuv2
+        if flags & 0x0001_0000 != 0 {
+            off += 8;
+        } // fuv3
 
         // Compressed UVs (Vector2As2int16 — 4 bytes each).
         let uv0 = if flags & 0x0002_0000 != 0 {
-            let o = off; off += 4; Some(o)
-        } else { None };
+            let o = off;
+            off += 4;
+            Some(o)
+        } else {
+            None
+        };
         let uv1 = if flags & 0x0004_0000 != 0 {
-            let o = off; off += 4; Some(o)
-        } else { None };
-        if flags & 0x0008_0000 != 0 { off += 4; }   // uv2
-        if flags & 0x0010_0000 != 0 { off += 4; }   // uv3
+            let o = off;
+            off += 4;
+            Some(o)
+        } else {
+            None
+        };
+        if flags & 0x0008_0000 != 0 {
+            off += 4;
+        } // uv2
+        if flags & 0x0010_0000 != 0 {
+            off += 4;
+        } // uv3
 
-        if flags & 0x0020_0000 != 0 { off += 12; }  // normalf2 (uncompressed normal #2)
-        if flags & 0x0040_0000 != 0 { off += 12; }  // tanf (uncompressed tangent)
+        if flags & 0x0020_0000 != 0 {
+            off += 12;
+        } // normalf2 (uncompressed normal #2)
+        if flags & 0x0040_0000 != 0 {
+            off += 12;
+        } // tanf (uncompressed tangent)
 
         // Compressed tangent (Vector3As3uint8 + unused byte).
         let tangent = if flags & 0x0100_0000 != 0 {
             Some(off)
-        } else { None };
+        } else {
+            None
+        };
 
-        Self { normal, uv0, uv1, tangent, skin }
+        Self {
+            normal,
+            uv0,
+            uv1,
+            tangent,
+            skin,
+        }
     }
 }
 
@@ -211,10 +271,10 @@ impl VertexOffsets {
 /// look: skip geometry that is off in the rest pose. (The reference importer
 /// shows everything regardless of pose — that's not the in-game appearance.)
 fn region_hidden_by_default(
-    region:       &Regn,
+    region: &Regn,
     regn_version: u32,
-    batch:        Option<&Bat>,
-    bones:        &[Bone],
+    batch: Option<&Bat>,
+    bones: &[Bone],
 ) -> bool {
     // REGN v4+ explicit flags: 0x1 hidden, 0x2 placeholder.
     if regn_version >= 4 && (region.flags & 0x3) != 0 {
@@ -235,25 +295,37 @@ fn region_hidden_by_default(
 
 /// Model-wide inputs every division reads.
 struct SharedGeometry<'a> {
-    vertex_data:   &'a [u8],
-    stride:        usize,
-    offsets:       &'a VertexOffsets,
+    vertex_data: &'a [u8],
+    stride: usize,
+    offsets: &'a VertexOffsets,
     resolved_refs: &'a [Option<usize>],
-    bone_lookup:   &'a [u16],
-    bones:         &'a [Bone],
+    bone_lookup: &'a [u16],
+    bones: &'a [Bone],
 }
 
 /// One division's own records.
 struct DivisionData {
-    regions:      Vec<Regn>,
+    regions: Vec<Regn>,
     regn_version: u32,
-    indices:      Vec<u16>,
-    batches:      Vec<Bat>,
+    indices: Vec<u16>,
+    batches: Vec<Bat>,
 }
 
 fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<MeshDataSoA> {
-    let SharedGeometry { vertex_data, stride, offsets, resolved_refs, bone_lookup, bones } = *shared;
-    let DivisionData { ref regions, regn_version, ref indices, ref batches } = *div;
+    let SharedGeometry {
+        vertex_data,
+        stride,
+        offsets,
+        resolved_refs,
+        bone_lookup,
+        bones,
+    } = *shared;
+    let DivisionData {
+        ref regions,
+        regn_version,
+        ref indices,
+        ref batches,
+    } = *div;
     let mut soa = MeshDataSoA::new();
 
     // Material→region binding. m3studio (io_m3_import.py:1056) collects ALL
@@ -270,7 +342,9 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
     let mut region_first_batch: Vec<Option<usize>> = vec![None; regions.len()];
     for (bi, batch) in batches.iter().enumerate() {
         let ridx = batch.region_index as usize;
-        if ridx >= regions.len() { continue; }
+        if ridx >= regions.len() {
+            continue;
+        }
         if region_first_batch[ridx].is_none() {
             region_first_batch[ridx] = Some(bi);
         }
@@ -283,7 +357,9 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
     for (ri, region) in regions.iter().enumerate() {
         let first = region.first_vertex_index as usize;
         let count = region.vertex_count as usize;
-        if count == 0 { continue; }
+        if count == 0 {
+            continue;
+        }
 
         // Default-pose visibility. Geometry that only appears during a specific
         // animation (Chromie's hourglass, death-decay gore, weapon trails,
@@ -291,7 +367,11 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
         // toggle bone (`BAT_.bone` → `Bone.batching`, default 0) or a REGN
         // hidden/placeholder flag. glTF can't express animated visibility, so we
         // skip it to match the in-game idle look.
-        let batch = region_first_batch.get(ri).copied().flatten().and_then(|bi| batches.get(bi));
+        let batch = region_first_batch
+            .get(ri)
+            .copied()
+            .flatten()
+            .and_then(|bi| batches.get(bi));
         let material = region_to_mat.get(ri).copied().flatten();
         let hidden = region_hidden_by_default(region, regn_version, batch, bones);
         // A region whose batch resolves to no representable material would
@@ -301,15 +381,29 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
 
         debug!(
             "  Region[{}]: first_vtx={} count={} stride={} first_face={} num_faces={} mat={:?} bone={:?} hidden={} skip={}",
-            ri, first, count, stride,
-            region.first_face_index, region.face_count,
-            material, batch.map(|b| b.bone), hidden, skip,
+            ri,
+            first,
+            count,
+            stride,
+            region.first_face_index,
+            region.face_count,
+            material,
+            batch.map(|b| b.bone),
+            hidden,
+            skip,
         );
 
-        if skip { continue; }
+        if skip {
+            continue;
+        }
 
         // Positions (offset=0 always).
-        let span = transform::VertexSpan { data: vertex_data, first, count, stride };
+        let span = transform::VertexSpan {
+            data: vertex_data,
+            first,
+            count,
+            stride,
+        };
         transform::extract_positions_to_soa(span, &mut soa)?;
 
         // Skinning — JOINTS_0/WEIGHTS_0. The bone_lookup window for the region:
@@ -319,86 +413,118 @@ fn convert_division(shared: &SharedGeometry<'_>, div: &DivisionData) -> Result<M
         if let Some(layout) = offsets.skin {
             let lk_start = region.first_bone_lookup_idx as usize;
             let lk_count = region.bone_lookup_count as usize;
-            let lk_end   = (lk_start + lk_count).min(bone_lookup.len());
+            let lk_end = (lk_start + lk_count).min(bone_lookup.len());
             let region_lookup = &bone_lookup[lk_start.min(bone_lookup.len())..lk_end];
             transform::decode_skin(span, layout, region_lookup, &mut soa)?;
         }
 
-        // Normals.
-        if let Some(normal_off) = offsets.normal {
-            transform::decode_normals_simd(span, normal_off, &mut soa)?;
-        } else {
-            for _ in 0..count {
-                soa.normals_x.push(0.0);
-                soa.normals_y.push(1.0);
-                soa.normals_z.push(0.0);
-            }
-        }
+        decode_surface(span, offsets, region, &mut soa)?;
 
-        // Tangents (VEC4: xyz + sign w). The bitangent sign sits in the 4th
-        // byte of the *normal* block, not the tangent block — pass the normal
-        // offset through so `decode_tangents` can read it.
-        if let Some(tangent_off) = offsets.tangent {
-            transform::decode_tangents(span, tangent_off, offsets.normal, &mut soa)?;
-        } else {
-            for _ in 0..count {
-                soa.tangents_x.push(1.0);
-                soa.tangents_y.push(0.0);
-                soa.tangents_z.push(0.0);
-                soa.tangents_w.push(1.0);
-            }
-        }
-
-        // UVs — m3studio always uses uv0 if present in vertex_flags.
-        // Formula: `raw * uv_multiply / 32768 + uv_offset`, V flipped.
-        {
-            let uv_multiply = if region.uv_multiply == 0.0 { 16.0 } else { region.uv_multiply };
-            let uv_offset = region.uv_offset;
-
-            if let Some(uv_off) = offsets.uv0 {
-                transform::decode_uvs(span, uv_off, uv_multiply, uv_offset, &mut soa)?;
-            } else {
-                for _ in 0..count {
-                    soa.uvs_u.push(0.0);
-                    soa.uvs_v.push(0.0);
-                }
-            }
-        }
-
-        // Indices. For REGN v≤2 indices are absolute (relative to the vertex
-        // buffer); we subtract `first_vertex_index` to make them region-local
-        // (see m3studio io_m3_import.py:1066-1068).
-        //
-        // A triangle that reaches outside its region's vertices is dropped:
-        // glTF forbids out-of-range indices, and in a real file it can only
-        // mean corruption.
-        let fi = region.first_face_index as usize;
-        let ni = region.face_count as usize;
         let index_start = soa.indices.len();
-        if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
-            let base = u32::try_from(soa.base_vertex_for_region())
-                .map_err(|_| anyhow::anyhow!("mesh exceeds u32::MAX vertices"))?;
-            let abs_to_local: u32 = if regn_version <= 2 { region.first_vertex_index } else { 0 };
-            let local = |i: u16| {
-                u32::from(i).checked_sub(abs_to_local).filter(|&l| l < region.vertex_count)
-            };
-            for tri in faces.chunks_exact(3) {
-                if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
-                    soa.indices.extend([a + base, b + base, c + base]);
-                }
-            }
-        }
+        append_region_indices(indices, region, regn_version, &mut soa)?;
         let index_count = soa.indices.len() - index_start;
         soa.commit_region();
 
-        soa.region_primitives.push(crate::processor::soa::RegionPrimitiveInfo {
-            index_start,
-            index_count,
-            material_index: material,
-        });
+        soa.region_primitives
+            .push(crate::processor::soa::RegionPrimitiveInfo {
+                index_start,
+                index_count,
+                material_index: material,
+            });
     }
 
     Ok(soa)
+}
+
+/// Normals, tangents and UVs of one region, with neutral defaults for
+/// components the vertex layout lacks (every attribute array stays as long
+/// as the position array).
+fn decode_surface(
+    span: transform::VertexSpan<'_>,
+    offsets: &VertexOffsets,
+    region: &Regn,
+    soa: &mut MeshDataSoA,
+) -> Result<()> {
+    let count = span.count;
+    if let Some(normal_off) = offsets.normal {
+        transform::decode_normals_simd(span, normal_off, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.normals_x.push(0.0);
+            soa.normals_y.push(1.0);
+            soa.normals_z.push(0.0);
+        }
+    }
+
+    // Tangents (VEC4: xyz + sign w). The bitangent sign sits in the 4th
+    // byte of the *normal* block, not the tangent block — pass the normal
+    // offset through so `decode_tangents` can read it.
+    if let Some(tangent_off) = offsets.tangent {
+        transform::decode_tangents(span, tangent_off, offsets.normal, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.tangents_x.push(1.0);
+            soa.tangents_y.push(0.0);
+            soa.tangents_z.push(0.0);
+            soa.tangents_w.push(1.0);
+        }
+    }
+
+    // UVs — m3studio always uses uv0 if present in vertex_flags.
+    // Formula: `raw * uv_multiply / 32768 + uv_offset`, V flipped.
+    let uv_multiply = if region.uv_multiply == 0.0 {
+        16.0
+    } else {
+        region.uv_multiply
+    };
+    if let Some(uv_off) = offsets.uv0 {
+        transform::decode_uvs(span, uv_off, uv_multiply, region.uv_offset, soa)?;
+    } else {
+        for _ in 0..count {
+            soa.uvs_u.push(0.0);
+            soa.uvs_v.push(0.0);
+        }
+    }
+    Ok(())
+}
+
+/// Appends one region's triangles to `soa.indices`, rebased onto the
+/// region's first vertex in the merged buffer.
+fn append_region_indices(
+    indices: &[u16],
+    region: &Regn,
+    regn_version: u32,
+    soa: &mut MeshDataSoA,
+) -> Result<()> {
+    // For REGN v≤2 indices are absolute (relative to the vertex
+    // buffer); we subtract `first_vertex_index` to make them region-local
+    // (see m3studio io_m3_import.py:1066-1068).
+    //
+    // A triangle that reaches outside its region's vertices is dropped:
+    // glTF forbids out-of-range indices, and in a real file it can only
+    // mean corruption.
+    let fi = region.first_face_index as usize;
+    let ni = region.face_count as usize;
+    if let Some(faces) = indices.get(fi..fi.saturating_add(ni)) {
+        let base = u32::try_from(soa.base_vertex_for_region())
+            .map_err(|_| anyhow::anyhow!("mesh exceeds u32::MAX vertices"))?;
+        let abs_to_local: u32 = if regn_version <= 2 {
+            region.first_vertex_index
+        } else {
+            0
+        };
+        let local = |i: u16| {
+            u32::from(i)
+                .checked_sub(abs_to_local)
+                .filter(|&l| l < region.vertex_count)
+        };
+        for tri in faces.chunks_exact(3) {
+            if let (Some(a), Some(b), Some(c)) = (local(tri[0]), local(tri[1]), local(tri[2])) {
+                soa.indices.extend([a + base, b + base, c + base]);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -442,13 +568,23 @@ mod visibility_tests {
     fn animated_toggle_default_off_is_hidden() {
         // Chromie's hourglass / War3 gore: animated batching, default flag 0.
         let bones = [toggle_bone(true, 0)];
-        assert!(region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
+        assert!(region_hidden_by_default(
+            &Regn::zeroed(),
+            3,
+            Some(&batch_for(0)),
+            &bones
+        ));
     }
 
     #[test]
     fn animated_toggle_default_on_is_visible() {
         let bones = [toggle_bone(true, 1)];
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
+        assert!(!region_hidden_by_default(
+            &Regn::zeroed(),
+            3,
+            Some(&batch_for(0)),
+            &bones
+        ));
     }
 
     #[test]
@@ -456,13 +592,27 @@ mod visibility_tests {
         // No animation on the batching property → always-on (the common case,
         // e.g. the body batch on root bone 0).
         let bones = [toggle_bone(false, 0)];
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(0)), &bones));
+        assert!(!region_hidden_by_default(
+            &Regn::zeroed(),
+            3,
+            Some(&batch_for(0)),
+            &bones
+        ));
     }
 
     #[test]
     fn negative_or_oob_bone_is_visible() {
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(-1)), &[]));
-        assert!(!region_hidden_by_default(&Regn::zeroed(), 3, Some(&batch_for(99)), &[]));
+        assert!(!region_hidden_by_default(
+            &Regn::zeroed(),
+            3,
+            Some(&batch_for(-1)),
+            &[]
+        ));
+        assert!(!region_hidden_by_default(
+            &Regn::zeroed(),
+            3,
+            Some(&batch_for(99)),
+            &[]
+        ));
     }
 }
-

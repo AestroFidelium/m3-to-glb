@@ -1,0 +1,15 @@
+# cargo-mutants: does the test suite actually notice when the code is wrong? It breaks the code
+# one small edit at a time (a mutant) and runs the tests. A "missed" mutant is behaviour no test
+# pins down. Night runs: tools/mutants_night.sh; one function by hand:
+#   cargo mutants -f src/json.rs -F 'num'
+test_tool = "nextest"
+# The first failing test already kills the mutant; the rest of the suite is wasted time.
+additional_cargo_test_args = ["--fail-fast"]
+# A mutant that trips a lint is still a mutant worth testing.
+cap_lints = true
+# Copy only the sources into the scratch tree: without this, the game assets in the working tree,
+# crashes/ and mutants/ are copied too (the default changed in cargo-mutants 27).
+gitignore = true
+# Equivalent mutants only: edits that cannot change observable behaviour, so no test can tell
+# them apart. Each entry gets a comment saying why. Never a way to hide a missing test.
+exclude_re = []
