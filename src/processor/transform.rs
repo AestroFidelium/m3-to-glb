@@ -20,9 +20,9 @@ use wide::f32x8;
 /// vertices of `stride` bytes each, starting at vertex `first`.
 #[derive(Debug, Clone, Copy)]
 pub struct VertexSpan<'a> {
-    pub data:   &'a [u8],
-    pub first:  usize,
-    pub count:  usize,
+    pub data: &'a [u8],
+    pub first: usize,
+    pub count: usize,
     pub stride: usize,
 }
 
@@ -44,7 +44,12 @@ const SNORM8_SCALE: f32 = 1.0 / 255.0;
 /// Extract vertex positions from the `AoS` buffer into the `SoA` buffers.
 /// SIMD via multiversion (AVX2 / SSE4.1 / scalar fallback).
 pub fn extract_positions_to_soa(span: VertexSpan<'_>, soa: &mut MeshDataSoA) -> Result<()> {
-    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
+    let VertexSpan {
+        data: vertex_data,
+        first: first_vertex,
+        count: vertex_count,
+        stride: vertex_stride,
+    } = span;
     ensure!(
         vertex_stride >= 12,
         "vertex_stride {vertex_stride} too small for position (need ≥ 12)"
@@ -53,7 +58,10 @@ pub fn extract_positions_to_soa(span: VertexSpan<'_>, soa: &mut MeshDataSoA) -> 
     ensure!(
         span_fits(span),
         "vertex buffer out of bounds: vertices {}..{} of {} bytes each, buffer has {}",
-        first_vertex, first_vertex + vertex_count, vertex_stride, vertex_data.len()
+        first_vertex,
+        first_vertex + vertex_count,
+        vertex_stride,
+        vertex_data.len()
     );
 
     soa.reserve(vertex_count, 0);
@@ -172,7 +180,12 @@ pub fn decode_normals_simd(
     component_offset: usize, // normal offset inside the vertex (from vertex_flags)
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
-    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
+    let VertexSpan {
+        data: vertex_data,
+        first: first_vertex,
+        count: vertex_count,
+        stride: vertex_stride,
+    } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {vertex_stride} too small for normals (offset={component_offset})"
@@ -248,13 +261,22 @@ use super::SkinLayout;
 /// glTF `JOINTS_0` / `WEIGHTS_0` are always VEC4 — for 2-pair models (skin0
 /// only or skin1 only) slots 2..3 are filled with index 0 and weight 0.
 pub fn decode_skin(
-    span:          VertexSpan<'_>,
-    layout:        SkinLayout,
+    span: VertexSpan<'_>,
+    layout: SkinLayout,
     region_lookup: &[u16],
-    soa:           &mut MeshDataSoA,
+    soa: &mut MeshDataSoA,
 ) -> Result<()> {
-    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
-    let SkinLayout { weights_offset, lookups_offset, pairs } = layout;
+    let VertexSpan {
+        data: vertex_data,
+        first: first_vertex,
+        count: vertex_count,
+        stride: vertex_stride,
+    } = span;
+    let SkinLayout {
+        weights_offset,
+        lookups_offset,
+        pairs,
+    } = layout;
     ensure!(
         pairs <= 4,
         "skin pairs ({pairs}) > 4 unsupported by glTF VEC4"
@@ -274,7 +296,7 @@ pub fn decode_skin(
         let w_off = base + weights_offset;
         let l_off = base + lookups_offset;
 
-        let mut joints  = [0u16; 4];
+        let mut joints = [0u16; 4];
         let mut weights = [0u8; 4];
         for j in 0..pairs {
             let weight = vertex_data[w_off + j];
@@ -286,7 +308,7 @@ pub fn decode_skin(
             }
             let lookup = vertex_data[l_off + j] as usize;
             let bone_idx = region_lookup.get(lookup).copied().unwrap_or(0);
-            joints[j]  = bone_idx;
+            joints[j] = bone_idx;
             weights[j] = weight;
         }
 
@@ -321,7 +343,12 @@ pub fn decode_tangents(
     normal_offset: Option<usize>,
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
-    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
+    let VertexSpan {
+        data: vertex_data,
+        first: first_vertex,
+        count: vertex_count,
+        stride: vertex_stride,
+    } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {vertex_stride} too small for tangent (offset={component_offset})"
@@ -386,7 +413,12 @@ pub fn decode_uvs(
     uv_offset: f32,
     soa: &mut MeshDataSoA,
 ) -> Result<()> {
-    let VertexSpan { data: vertex_data, first: first_vertex, count: vertex_count, stride: vertex_stride } = span;
+    let VertexSpan {
+        data: vertex_data,
+        first: first_vertex,
+        count: vertex_count,
+        stride: vertex_stride,
+    } = span;
     ensure!(
         vertex_stride >= component_offset + 4,
         "vertex_stride {vertex_stride} too small for UV (offset={component_offset})"

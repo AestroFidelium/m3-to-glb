@@ -73,7 +73,6 @@ pub struct MeshDataSoA {
     pub indices: Vec<u32>,
 
     // ── Metadata ────────────────────────────────────────────────────────────
-
     /// Lower corner of the bounding box — computed during conversion.
     pub aabb_min: [f32; 3],
     /// Upper corner of the bounding box.

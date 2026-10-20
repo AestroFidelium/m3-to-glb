@@ -56,28 +56,28 @@ pub struct Sampler {
     /// Frame timestamps in seconds (ms→s, divide by 1000).
     pub times_sec: Vec<f32>,
     /// Values at `times_sec`.
-    pub data:      SamplerData,
+    pub data: SamplerData,
     /// LINEAR vs STEP. For bone TRS we always use LINEAR — see
     /// `build_vec3_sampler` / `build_quat_sampler` for the reasoning.
-    pub linear:    bool,
+    pub linear: bool,
 }
 
 /// Binds a sampler to a bone node property.
 #[derive(Debug, Clone)]
 pub struct Channel {
     /// Index into [`Animation::samplers`].
-    pub sampler:     usize,
+    pub sampler: usize,
     /// glTF node index of the bone.
     pub target_node: usize,
     /// Which property of that node.
-    pub path:        Path,
+    pub path: Path,
 }
 
 /// One clip — an M3 `STC_` — in glTF terms.
 #[derive(Debug, Clone)]
 pub struct Animation {
     /// Clip name as authored (`Stand_full`, `Walk A_full`, …).
-    pub name:     String,
+    pub name: String,
     /// Keyframe tracks.
     pub samplers: Vec<Sampler>,
     /// Which bone property each track drives.
@@ -154,12 +154,14 @@ pub(crate) fn dedupe_frames(frames_ms: &[i32]) -> (Vec<f32>, Vec<usize>) {
 ///
 /// The base model's bone table cannot be read.
 pub fn build_animations(
-    base:           &M3File<'_>,
-    anim_sources:   &[&M3File<'_>],
+    base: &M3File<'_>,
+    anim_sources: &[&M3File<'_>],
     bone_node_base: usize,
 ) -> Result<Vec<Animation>> {
     let bones = base.bones()?;
-    if bones.is_empty() { return Ok(Vec::new()); }
+    if bones.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let mut anims: Vec<Animation> = Vec::new();
 
@@ -171,14 +173,19 @@ pub fn build_animations(
         if seqs.is_empty() || stcs.is_empty() {
             debug!(
                 "anim source #{}: SEQS={} STC={} — skipping",
-                src_idx, seqs.len(), stcs.len()
+                src_idx,
+                seqs.len(),
+                stcs.len()
             );
             continue;
         }
 
         debug!(
             "anim source #{}: SEQS={} STG={} STC={}",
-            src_idx, seqs.len(), stgs.len(), stcs.len()
+            src_idx,
+            seqs.len(),
+            stgs.len(),
+            stcs.len()
         );
 
         let mut emitted = vec![false; stcs.len()];
@@ -190,13 +197,17 @@ pub fn build_animations(
 
             for stc_idx_u32 in stc_indices {
                 let stc_idx = stc_idx_u32 as usize;
-                if stc_idx >= stcs.len() { continue; }
-                if emitted[stc_idx] { continue; }
+                if stc_idx >= stcs.len() {
+                    continue;
+                }
+                if emitted[stc_idx] {
+                    continue;
+                }
                 emitted[stc_idx] = true;
 
-                if let Some(anim) = build_one_animation(
-                    src, &stcs[stc_idx], &bones, &group_name, bone_node_base,
-                ) {
+                if let Some(anim) =
+                    build_one_animation(src, &stcs[stc_idx], &bones, &group_name, bone_node_base)
+                {
                     anims.push(anim);
                 }
             }
@@ -204,7 +215,9 @@ pub fn build_animations(
 
         // STCs not bound to any STG.
         for (stc_idx, stc) in stcs.iter().enumerate() {
-            if emitted[stc_idx] { continue; }
+            if emitted[stc_idx] {
+                continue;
+            }
             if let Some(anim) = build_one_animation(src, stc, &bones, "", bone_node_base) {
                 anims.push(anim);
             }
@@ -215,10 +228,10 @@ pub fn build_animations(
 }
 
 fn build_one_animation(
-    m3:             &M3File<'_>,
-    stc:            &crate::m3::structures::Stc,
-    bones:          &[Bone],
-    group_name:     &str,
+    m3: &M3File<'_>,
+    stc: &crate::m3::structures::Stc,
+    bones: &[Bone],
+    group_name: &str,
     bone_node_base: usize,
 ) -> Option<Animation> {
     let stc_name = m3.read_char(&stc.name).unwrap_or("").to_owned();
@@ -241,7 +254,9 @@ fn build_one_animation(
     if anim_ids.len() != anim_refs.len() {
         debug!(
             "STC '{}': anim_ids({}) != anim_refs({}); skipping",
-            anim_name, anim_ids.len(), anim_refs.len()
+            anim_name,
+            anim_ids.len(),
+            anim_refs.len()
         );
         return None;
     }
@@ -269,7 +284,9 @@ fn build_one_animation(
             if anim_id == 0 {
                 continue;
             }
-            let Some((kind, idx)) = lookup.lookup(anim_id) else { continue };
+            let Some((kind, idx)) = lookup.lookup(anim_id) else {
+                continue;
+            };
             if kind != want_kind {
                 continue;
             }
@@ -277,12 +294,22 @@ fn build_one_animation(
             // Only the root's translation and rotation carry the Z-up → Y-up
             // bake; scale is axis-independent of it.
             let sampler = match path {
-                Path::Translation => sd3v_arr.get(idx).and_then(|b| build_vec3_sampler(m3, b, is_root)),
-                Path::Rotation => sd4q_arr.get(idx).and_then(|b| build_quat_sampler(m3, b, is_root)),
-                Path::Scale => sd3v_arr.get(idx).and_then(|b| build_vec3_sampler(m3, b, false)),
+                Path::Translation => sd3v_arr
+                    .get(idx)
+                    .and_then(|b| build_vec3_sampler(m3, b, is_root)),
+                Path::Rotation => sd4q_arr
+                    .get(idx)
+                    .and_then(|b| build_quat_sampler(m3, b, is_root)),
+                Path::Scale => sd3v_arr
+                    .get(idx)
+                    .and_then(|b| build_vec3_sampler(m3, b, false)),
             };
             if let Some(samp) = sampler {
-                channels.push(Channel { sampler: samplers.len(), target_node, path });
+                channels.push(Channel {
+                    sampler: samplers.len(),
+                    target_node,
+                    path,
+                });
                 samplers.push(samp);
             }
         }
@@ -298,10 +325,16 @@ fn build_one_animation(
 
     debug!(
         "anim '{}': {} samplers, {} channels",
-        anim_name, samplers.len(), channels.len()
+        anim_name,
+        samplers.len(),
+        channels.len()
     );
 
-    Some(Animation { name: anim_name, samplers, channels })
+    Some(Animation {
+        name: anim_name,
+        samplers,
+        channels,
+    })
 }
 
 fn build_vec3_sampler(m3: &M3File<'_>, block: &Sd3v, apply_zy: bool) -> Option<Sampler> {
@@ -312,8 +345,10 @@ fn build_vec3_sampler(m3: &M3File<'_>, block: &Sd3v, apply_zy: bool) -> Option<S
     // Honoring it would emit STEP everywhere and produce frame-by-frame
     // pop instead of smooth motion.
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
-    let values    = m3.read_ref_vec3(&block.keys).unwrap_or_default();
-    if frames_ms.is_empty() || values.is_empty() { return None; }
+    let values = m3.read_ref_vec3(&block.keys).unwrap_or_default();
+    if frames_ms.is_empty() || values.is_empty() {
+        return None;
+    }
     let n = frames_ms.len().min(values.len());
     let frames_ms = &frames_ms[..n];
     let values = &values[..n];
@@ -341,8 +376,10 @@ fn build_quat_sampler(m3: &M3File<'_>, block: &Sd4q, apply_zy: bool) -> Option<S
     // See note in `build_vec3_sampler`: bone rotation always interpolates
     // LINEAR. m3studio does the same (`io_m3_import.py:590`).
     let frames_ms = m3.read_ref_i32(&block.frames).unwrap_or_default();
-    let values    = m3.read_ref_quat(&block.keys).unwrap_or_default();
-    if frames_ms.is_empty() || values.is_empty() { return None; }
+    let values = m3.read_ref_quat(&block.keys).unwrap_or_default();
+    if frames_ms.is_empty() || values.is_empty() {
+        return None;
+    }
     let n = frames_ms.len().min(values.len());
     let frames_ms = &frames_ms[..n];
     let values = &values[..n];
@@ -366,7 +403,7 @@ fn build_quat_sampler(m3: &M3File<'_>, block: &Sd4q, apply_zy: bool) -> Option<S
     // hemisphere of every sample to its predecessor.
     for i in 1..data.len() {
         let prev = data[i - 1];
-        let cur  = data[i];
+        let cur = data[i];
         let dot = prev[0] * cur[0] + prev[1] * cur[1] + prev[2] * cur[2] + prev[3] * cur[3];
         if dot < 0.0 {
             data[i] = [-cur[0], -cur[1], -cur[2], -cur[3]];
@@ -379,4 +416,3 @@ fn build_quat_sampler(m3: &M3File<'_>, block: &Sd4q, apply_zy: bool) -> Option<S
         linear: true,
     })
 }
-

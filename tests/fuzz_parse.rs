@@ -91,8 +91,8 @@ fn parse_huge_tag_count_is_err_not_panic() {
 /// runs in plain `cargo test`.
 #[test]
 fn mutate_real_m3_never_panics() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("Storm_Doodad_DS19_Trees_00.m3");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Storm_Doodad_DS19_Trees_00.m3");
     let Ok(seed) = std::fs::read(&path) else {
         eprintln!("skip mutate_real_m3: seed not present");
         return;

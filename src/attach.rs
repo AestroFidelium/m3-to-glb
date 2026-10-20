@@ -45,10 +45,10 @@ const SHAPES: [&str; 3] = ["cuboid", "sphere", "cylinder"];
 #[derive(Debug, Clone, Copy)]
 pub struct Volume {
     /// Shape name, or `"unknown"` for a value structures.xml does not name.
-    pub shape:  &'static str,
+    pub shape: &'static str,
     /// Raw M3 size triple. Its meaning follows `shape`: radius for a sphere,
     /// extents for a cuboid, radius + height for a cylinder.
-    pub size:   [f32; 3],
+    pub size: [f32; 3],
     /// Bone-local transform of the volume. Stored in glTF's own column-major
     /// order (translation at 12..15), so it feeds `Mat4::from_cols_array`
     /// unchanged.
@@ -59,9 +59,9 @@ pub struct Volume {
 #[derive(Debug, Clone)]
 pub struct Attachment {
     /// Attachment name as authored — `Ref_Head`, `Ref_Weapon Right`, …
-    pub name:   String,
+    pub name: String,
     /// Index into the bone array, which is also the glTF node index.
-    pub bone:   usize,
+    pub bone: usize,
     /// The `ATVL` hit / target volume on the same bone, if one exists.
     pub volume: Option<Volume>,
 }
@@ -101,7 +101,10 @@ pub fn collect(m3: &M3File<'_>, bone_count: usize) -> Vec<Attachment> {
     for att in &atts {
         let bone = att.bone as usize;
         if bone >= bone_count {
-            debug!("ATT_ bone {} out of range ({} bones) — skipped", bone, bone_count);
+            debug!(
+                "ATT_ bone {} out of range ({} bones) — skipped",
+                bone, bone_count
+            );
             continue;
         }
         let name = m3.read_char(&att.name).unwrap_or("").to_owned();
@@ -122,12 +125,10 @@ pub fn collect(m3: &M3File<'_>, bone_count: usize) -> Vec<Attachment> {
 fn volume_of(v: &Atvl) -> Volume {
     let m = v.matrix;
     Volume {
-        shape:  SHAPES.get(v.shape as usize).copied().unwrap_or("unknown"),
-        size:   [v.size0, v.size1, v.size2],
+        shape: SHAPES.get(v.shape as usize).copied().unwrap_or("unknown"),
+        size: [v.size0, v.size1, v.size2],
         matrix: [
-            m.x.x, m.x.y, m.x.z, m.x.w,
-            m.y.x, m.y.y, m.y.z, m.y.w,
-            m.z.x, m.z.y, m.z.z, m.z.w,
+            m.x.x, m.x.y, m.x.z, m.x.w, m.y.x, m.y.y, m.y.z, m.y.w, m.z.x, m.z.y, m.z.z, m.z.w,
             m.w.x, m.w.y, m.w.z, m.w.w,
         ],
     }

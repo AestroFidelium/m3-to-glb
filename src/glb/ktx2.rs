@@ -59,7 +59,7 @@ pub struct EncodeOptions {
 /// GLB buffer.
 pub fn transcode(input_path: &Path, opts: EncodeOptions) -> Result<Vec<u8>> {
     let tmp = tempfile::tempdir().context("creating tempdir for KTX2 transcode")?;
-    let png_path  = tmp.path().join("input.png");
+    let png_path = tmp.path().join("input.png");
     let ktx2_path = tmp.path().join("output.ktx2");
 
     // Decode → optional Blizzard normal unswizzle → optional resize →
@@ -129,9 +129,9 @@ pub fn transcode(input_path: &Path, opts: EncodeOptions) -> Result<Vec<u8>> {
 /// glTF layout before being embedded.
 pub fn read_with_optional_downscale(
     input_path: &Path,
-    role:       TextureRole,
-    max_dim:    u32,
-    src_mime:   &str,
+    role: TextureRole,
+    max_dim: u32,
+    src_mime: &str,
 ) -> Result<(Vec<u8>, String)> {
     let needs_decode = role == TextureRole::NormalMap;
 
@@ -192,7 +192,11 @@ fn unpack_blizzard_normal(img: DynamicImage) -> DynamicImage {
         let ny = f32::from(g) / 127.5 - 1.0;
         let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
         // ((nz + 1) / 2) * 255 — encoded outward Z, always >= 127.
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to 0..=255")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "clamped to 0..=255"
+        )]
         let b = ((nz + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
         px.0 = [a, g, b, 255];
     }
@@ -209,7 +213,11 @@ fn maybe_downscale(img: DynamicImage, max_dim: u32) -> DynamicImage {
     }
     let scale = max_dim as f32 / w.max(h) as f32;
     // `scale < 1`, so each side shrinks: the result fits in u32 and is positive.
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "scale < 1 shrinks a u32 side")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "scale < 1 shrinks a u32 side"
+    )]
     let side = |v: u32| ((v as f32 * scale).round() as u32).max(1);
     let (new_w, new_h) = (side(w), side(h));
     img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)

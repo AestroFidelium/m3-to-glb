@@ -27,9 +27,11 @@
 pub mod structures;
 pub mod reader;
 
-pub use reader::{M3File, layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags};
+pub use reader::{
+    M3File, layr_record_size, layr_uv_tiling_offset, mat_record_size, stride_from_flags,
+};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Parse an M3 file from an mmap buffer. Zero-copy — no allocations.
 ///

@@ -29,7 +29,16 @@ use m3_to_glb::{Converter, TextureCache};
 
 /// Names drawn by index, so the fuzzer can hit interesting strings (empty,
 /// quotes, control characters, non-ASCII) without having to invent them.
-const NAMES: [&str; 8] = ["", "Root", "Ref_Head", "Stand_full", "a\"b\\c", "\u{1}\u{1f}", "Кость", "x_diff.dds"];
+const NAMES: [&str; 8] = [
+    "",
+    "Root",
+    "Ref_Head",
+    "Stand_full",
+    "a\"b\\c",
+    "\u{1}\u{1f}",
+    "Кость",
+    "x_diff.dds",
+];
 const LAYERS: [&str; 6] = ["diff", "norm", "emis1", "ao", "spec", "nonexistent"];
 
 fn name(i: u8) -> String {
@@ -50,10 +59,10 @@ fn pod_from<T: bytemuck::Pod>(bytes: &[u8]) -> T {
 
 #[derive(Debug, Arbitrary)]
 struct FuzzVtx {
-    pos:     [f32; 3],
-    normal:  [u8; 4],
+    pos: [f32; 3],
+    normal: [u8; 4],
     tangent: [u8; 4],
-    uv0:     [i16; 2],
+    uv0: [i16; 2],
     weights: [u8; 4],
     lookups: [u8; 4],
 }
@@ -62,39 +71,39 @@ struct FuzzVtx {
 struct FuzzRegion {
     first_vertex: u8,
     vertex_count: u8,
-    first_face:   u8,
-    face_count:   u8,
+    first_face: u8,
+    face_count: u8,
     lookup_first: u8,
     lookup_count: u8,
-    flags:        u8,
-    uv_multiply:  f32,
-    uv_offset:    f32,
+    flags: u8,
+    uv_multiply: f32,
+    uv_offset: f32,
 }
 
 #[derive(Debug, Arbitrary)]
 struct FuzzBone {
-    name:     u8,
-    parent:   i8,
-    t:        [f32; 3],
-    r:        [f32; 4],
-    s:        [f32; 3],
+    name: u8,
+    parent: i8,
+    t: [f32; 3],
+    r: [f32; 4],
+    s: [f32; 3],
     anim_ids: [u8; 3],
     batching: (u8, u8, u8),
 }
 
 #[derive(Debug, Arbitrary)]
 struct FuzzLayer {
-    which:  u8,
+    which: u8,
     texture: u8,
-    color:  Option<[u8; 4]>,
+    color: Option<[u8; 4]>,
     tiling: [f32; 2],
 }
 
 #[derive(Debug, Arbitrary)]
 struct FuzzMaterial {
-    blend:  u8,
-    flags:  u8,
-    alpha:  u8,
+    blend: u8,
+    flags: u8,
+    alpha: u8,
     layers: Vec<FuzzLayer>,
 }
 
@@ -124,14 +133,14 @@ impl FuzzTrack {
 
 #[derive(Debug, Arbitrary)]
 struct FuzzStc {
-    name:   u8,
+    name: u8,
     tracks: Vec<(u8, FuzzTrack)>,
-    short:  bool,
+    short: bool,
 }
 
 #[derive(Debug, Arbitrary)]
 struct FuzzAnims {
-    stcs:      Vec<FuzzStc>,
+    stcs: Vec<FuzzStc>,
     sequences: Vec<(u8, Vec<u8>)>,
 }
 
@@ -142,8 +151,13 @@ impl FuzzAnims {
             .iter()
             .take(4)
             .map(|s| StcSpec {
-                name:       name(s.name),
-                tracks:     s.tracks.iter().take(6).map(|(id, t)| (u32::from(*id % 16), t.track())).collect(),
+                name: name(s.name),
+                tracks: s
+                    .tracks
+                    .iter()
+                    .take(6)
+                    .map(|(id, t)| (u32::from(*id % 16), t.track()))
+                    .collect(),
                 short_refs: s.short,
             })
             .collect();
@@ -151,41 +165,44 @@ impl FuzzAnims {
             .sequences
             .iter()
             .take(3)
-            .map(|(n, stcs)| SeqSpec { name: name(*n), stcs: stcs.iter().take(4).map(|&i| u32::from(i % 6)).collect() })
+            .map(|(n, stcs)| SeqSpec {
+                name: name(*n),
+                stcs: stcs.iter().take(4).map(|&i| u32::from(i % 6)).collect(),
+            })
             .collect();
     }
 }
 
 #[derive(Debug, Arbitrary)]
 struct FuzzModel {
-    magic:        u8,
+    magic: u8,
     vertex_flags: u32,
-    vertices:     Vec<FuzzVtx>,
+    vertices: Vec<FuzzVtx>,
     vertex_slack: i8,
-    faces:        Vec<u16>,
+    faces: Vec<u16>,
     regn_version: u8,
-    regions:      Vec<FuzzRegion>,
-    batches:      Vec<(u8, u8, i8)>,
-    force_div:    bool,
-    bone_lookup:  Vec<u8>,
-    bones:        Vec<FuzzBone>,
-    iref:         bool,
-    versions:     [u8; 10],
-    materials:    Vec<FuzzMaterial>,
-    madds:        Vec<Vec<u8>>,
-    matms:        Vec<(u8, u8)>,
-    composites:   Vec<Vec<u8>>,
-    anims:        FuzzAnims,
-    particles:    Vec<(u8, u8, Vec<u8>)>,
-    lights:       Vec<(u8, Vec<u8>)>,
-    projections:  Vec<(u8, u8, Vec<u8>)>,
-    attachments:  Vec<(u8, u8)>,
-    volumes:      Vec<(u8, Vec<u8>)>,
+    regions: Vec<FuzzRegion>,
+    batches: Vec<(u8, u8, i8)>,
+    force_div: bool,
+    bone_lookup: Vec<u8>,
+    bones: Vec<FuzzBone>,
+    iref: bool,
+    versions: [u8; 10],
+    materials: Vec<FuzzMaterial>,
+    madds: Vec<Vec<u8>>,
+    matms: Vec<(u8, u8)>,
+    composites: Vec<Vec<u8>>,
+    anims: FuzzAnims,
+    particles: Vec<(u8, u8, Vec<u8>)>,
+    lights: Vec<(u8, Vec<u8>)>,
+    projections: Vec<(u8, u8, Vec<u8>)>,
+    attachments: Vec<(u8, u8)>,
+    volumes: Vec<(u8, Vec<u8>)>,
     /// A companion `.m3a` file, when present.
-    m3a:          Option<FuzzAnims>,
-    fx:           bool,
+    m3a: Option<FuzzAnims>,
+    fx: bool,
     /// Byte flips applied to the serialized model.
-    corruption:   Vec<(u32, u8)>,
+    corruption: Vec<(u32, u8)>,
 }
 
 impl FuzzModel {
@@ -240,39 +257,52 @@ impl FuzzModel {
             .iter()
             .take(4)
             .map(|r| RegionSpec {
-                first_vertex:      u32::from(r.first_vertex),
-                vertex_count:      u32::from(r.vertex_count),
-                first_face:        u32::from(r.first_face),
-                face_count:        u32::from(r.face_count),
+                first_vertex: u32::from(r.first_vertex),
+                vertex_count: u32::from(r.vertex_count),
+                first_face: u32::from(r.first_face),
+                face_count: u32::from(r.face_count),
                 first_bone_lookup: u16::from(r.lookup_first),
                 bone_lookup_count: u16::from(r.lookup_count),
-                flags:             u32::from(r.flags),
-                uv_multiply:       r.uv_multiply,
-                uv_offset:         r.uv_offset,
+                flags: u32::from(r.flags),
+                uv_multiply: r.uv_multiply,
+                uv_offset: r.uv_offset,
             })
             .collect();
         spec.batches = self
             .batches
             .iter()
             .take(6)
-            .map(|&(region, matm, bone)| BatchSpec { region: u16::from(region % 6), matm: u16::from(matm % 8), bone: i16::from(bone) })
+            .map(|&(region, matm, bone)| BatchSpec {
+                region: u16::from(region % 6),
+                matm: u16::from(matm % 8),
+                bone: i16::from(bone),
+            })
             .collect();
     }
 
     fn skeleton(&self, spec: &mut ModelSpec) {
-        spec.bone_lookup = self.bone_lookup.iter().take(16).map(|&b| u16::from(b % 20)).collect();
+        spec.bone_lookup = self
+            .bone_lookup
+            .iter()
+            .take(16)
+            .map(|&b| u16::from(b % 20))
+            .collect();
         spec.bones = self
             .bones
             .iter()
             .take(12)
             .map(|b| BoneSpec {
-                name:     name(b.name),
-                parent:   i16::from(b.parent),
-                t:        b.t,
-                r:        b.r,
-                s:        b.s,
+                name: name(b.name),
+                parent: i16::from(b.parent),
+                t: b.t,
+                r: b.r,
+                s: b.s,
                 anim_ids: b.anim_ids.map(|i| u32::from(i % 16)),
-                batching: (u16::from(b.batching.0), u32::from(b.batching.1), u32::from(b.batching.2 % 2)),
+                batching: (
+                    u16::from(b.batching.0),
+                    u32::from(b.batching.1),
+                    u32::from(b.batching.2 % 2),
+                ),
             })
             .collect();
     }
@@ -283,30 +313,45 @@ impl FuzzModel {
             .iter()
             .take(4)
             .map(|m| MatSpec {
-                blend:           u32::from(m.blend % 8),
+                blend: u32::from(m.blend % 8),
                 // The high bits of the same draw: the emissive layer's blend.
-                emis_blend:      u32::from(m.blend >> 4),
-                flags:           u32::from(m.flags),
+                emis_blend: u32::from(m.blend >> 4),
+                flags: u32::from(m.flags),
                 alpha_threshold: u32::from(m.alpha),
-                layers:          m
+                layers: m
                     .layers
                     .iter()
                     .take(4)
                     .map(|l| {
-                        let layer = LayerSpec { texture: name(l.texture), color: l.color, uv_tiling: l.tiling, ..LayerSpec::default() };
+                        let layer = LayerSpec {
+                            texture: name(l.texture),
+                            color: l.color,
+                            uv_tiling: l.tiling,
+                            ..LayerSpec::default()
+                        };
                         (pick(&LAYERS, l.which), layer)
                     })
                     .collect(),
             })
             .collect();
-        spec.madds = self.madds.iter().take(3).map(|p| p.iter().take(4).map(|&n| name(n)).collect()).collect();
+        spec.madds = self
+            .madds
+            .iter()
+            .take(3)
+            .map(|p| p.iter().take(4).map(|&n| name(n)).collect())
+            .collect();
         spec.matms = self
             .matms
             .iter()
             .take(8)
             .map(|&(t, i)| (pick(&[1, 1, 3, 12, 2, 0], t), u32::from(i % 6)))
             .collect();
-        spec.composites = self.composites.iter().take(3).map(|s| s.iter().take(3).map(|&i| u32::from(i % 9)).collect()).collect();
+        spec.composites = self
+            .composites
+            .iter()
+            .take(3)
+            .map(|s| s.iter().take(3).map(|&i| u32::from(i % 9)).collect())
+            .collect();
     }
 
     fn effects(&self, spec: &mut ModelSpec) {
@@ -315,26 +360,45 @@ impl FuzzModel {
             .particles
             .iter()
             .take(3)
-            .map(|(b, mat, raw)| Par { bone: u32::from(bone(*b)), material_reference_index: u32::from(*mat % 8), ..pod_from(raw) })
+            .map(|(b, mat, raw)| Par {
+                bone: u32::from(bone(*b)),
+                material_reference_index: u32::from(*mat % 8),
+                ..pod_from(raw)
+            })
             .collect();
         spec.lights = self
             .lights
             .iter()
             .take(3)
-            .map(|(b, raw)| Lite { bone: u16::from(bone(*b)), ..pod_from(raw) })
+            .map(|(b, raw)| Lite {
+                bone: u16::from(bone(*b)),
+                ..pod_from(raw)
+            })
             .collect();
         spec.projections = self
             .projections
             .iter()
             .take(3)
-            .map(|(b, mat, raw)| Proj { bone: u32::from(bone(*b)), material_reference_index: u32::from(*mat % 8), ..pod_from(raw) })
+            .map(|(b, mat, raw)| Proj {
+                bone: u32::from(bone(*b)),
+                material_reference_index: u32::from(*mat % 8),
+                ..pod_from(raw)
+            })
             .collect();
-        spec.attachments = self.attachments.iter().take(4).map(|&(n, b)| (name(n), u32::from(bone(b)))).collect();
+        spec.attachments = self
+            .attachments
+            .iter()
+            .take(4)
+            .map(|&(n, b)| (name(n), u32::from(bone(b))))
+            .collect();
         spec.volumes = self
             .volumes
             .iter()
             .take(3)
-            .map(|(b, raw)| Atvl { bone0: u32::from(bone(*b)), ..pod_from::<Atvl>(raw) })
+            .map(|(b, raw)| Atvl {
+                bone0: u32::from(bone(*b)),
+                ..pod_from::<Atvl>(raw)
+            })
             .collect();
     }
 
@@ -349,16 +413,20 @@ impl FuzzModel {
 /// Convert and check. Errors are fine; panics and invalid output are not.
 fn run(model: &FuzzModel) {
     let mut bytes = model.spec().build();
-    corrupt(&mut bytes, &model.corruption[..model.corruption.len().min(8)]);
+    corrupt(
+        &mut bytes,
+        &model.corruption[..model.corruption.len().min(8)],
+    );
     let m3a = model.m3a();
     let mut c = Converter::new().effects(model.fx);
     if let Some(a) = &m3a {
         c = c.animations(a);
     }
     if let Ok(glb) = c.convert(&bytes)
-        && let Err(e) = check_glb(&glb.bytes) {
-            panic!("converter produced an invalid GLB: {e}\n{model:#?}");
-        }
+        && let Err(e) = check_glb(&glb.bytes)
+    {
+        panic!("converter produced an invalid GLB: {e}\n{model:#?}");
+    }
 }
 
 #[test]

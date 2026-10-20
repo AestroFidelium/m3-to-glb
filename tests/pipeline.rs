@@ -5,7 +5,10 @@
 //! asserts on what the glTF says — material modes, skin layout, animation
 //! channels, effect nodes. Nothing here needs a Blizzard asset.
 
-#![allow(clippy::float_cmp, reason = "asserting values the converter copies through or writes as constants")]
+#![allow(
+    clippy::float_cmp,
+    reason = "asserting values the converter copies through or writes as constants"
+)]
 
 mod common;
 
@@ -71,10 +74,23 @@ fn old_regions_hold_absolute_indices() {
     let second: Vec<Vtx> = spec.vertices.clone();
     spec.vertices.extend(second);
     spec.faces.extend([4, 5, 6, 4, 6, 7]);
-    spec.regions.push(RegionSpec { first_vertex: 4, vertex_count: 4, first_face: 6, face_count: 6, ..spec.regions[0] });
-    spec.batches.push(BatchSpec { region: 1, matm: 0, bone: -1 });
+    spec.regions.push(RegionSpec {
+        first_vertex: 4,
+        vertex_count: 4,
+        first_face: 6,
+        face_count: 6,
+        ..spec.regions[0]
+    });
+    spec.batches.push(BatchSpec {
+        region: 1,
+        matm: 0,
+        bone: -1,
+    });
     let g = convert(&spec);
-    assert_eq!(g.json["meshes"][0]["primitives"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        g.json["meshes"][0]["primitives"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[test]
@@ -171,9 +187,20 @@ fn a_region_without_a_batch_has_no_material_and_is_skipped() {
 #[test]
 fn batches_for_missing_regions_are_ignored() {
     let mut spec = ModelSpec::quad();
-    spec.batches.insert(0, BatchSpec { region: 9, matm: 0, bone: -1 });
+    spec.batches.insert(
+        0,
+        BatchSpec {
+            region: 9,
+            matm: 0,
+            bone: -1,
+        },
+    );
     // A second batch on the same region does not replace the first.
-    spec.batches.push(BatchSpec { region: 0, matm: 5, bone: -1 });
+    spec.batches.push(BatchSpec {
+        region: 0,
+        matm: 5,
+        bone: -1,
+    });
     assert_eq!(convert(&spec).count("materials"), 1);
 }
 
@@ -187,7 +214,10 @@ fn zero_vertex_region_is_skipped() {
 
 #[test]
 fn effect_only_model_has_no_mesh() {
-    let spec = ModelSpec { bones: vec![BoneSpec::named("Root", -1)], ..ModelSpec::default() };
+    let spec = ModelSpec {
+        bones: vec![BoneSpec::named("Root", -1)],
+        ..ModelSpec::default()
+    };
     let g = convert(&spec);
     assert_eq!(g.count("meshes"), 0);
     assert!(g.bin.is_empty());
@@ -202,7 +232,10 @@ fn an_empty_model_is_a_valid_empty_file() {
 
 #[test]
 fn division_without_regions_is_empty() {
-    let spec = ModelSpec { force_division: true, ..ModelSpec::default() };
+    let spec = ModelSpec {
+        force_division: true,
+        ..ModelSpec::default()
+    };
     assert_eq!(convert(&spec).count("meshes"), 0);
 }
 
@@ -236,10 +269,24 @@ fn every_material_version_places_its_layers() {
     for v in [15, 16, 17, 18, 19, 20, 21] {
         let mut spec = ModelSpec::quad();
         spec.mat_version = v;
-        spec.materials[0].layers = vec![("diff", LayerSpec { color: Some([0, 0, 255, 255]), ..LayerSpec::default() })];
+        spec.materials[0].layers = vec![(
+            "diff",
+            LayerSpec {
+                color: Some([0, 0, 255, 255]),
+                ..LayerSpec::default()
+            },
+        )];
         let m = material(&spec);
-        assert_eq!(f(&m["pbrMetallicRoughness"]["baseColorFactor"][0]), 1.0, "MAT_ v{v}");
-        assert_eq!(f(&m["pbrMetallicRoughness"]["baseColorFactor"][2]), 0.0, "MAT_ v{v}");
+        assert_eq!(
+            f(&m["pbrMetallicRoughness"]["baseColorFactor"][0]),
+            1.0,
+            "MAT_ v{v}"
+        );
+        assert_eq!(
+            f(&m["pbrMetallicRoughness"]["baseColorFactor"][2]),
+            0.0,
+            "MAT_ v{v}"
+        );
     }
 }
 
@@ -257,8 +304,20 @@ fn every_layer_version_reads() {
 fn colour_layers_become_factors() {
     let mut spec = ModelSpec::quad();
     spec.materials[0].layers = vec![
-        ("diff", LayerSpec { color: Some([255, 0, 0, 255]), ..LayerSpec::default() }),
-        ("emis1", LayerSpec { color: Some([0, 255, 0, 255]), ..LayerSpec::default() }),
+        (
+            "diff",
+            LayerSpec {
+                color: Some([255, 0, 0, 255]),
+                ..LayerSpec::default()
+            },
+        ),
+        (
+            "emis1",
+            LayerSpec {
+                color: Some([0, 255, 0, 255]),
+                ..LayerSpec::default()
+            },
+        ),
     ];
     let m = material(&spec);
     let base = &m["pbrMetallicRoughness"]["baseColorFactor"];
@@ -274,10 +333,17 @@ fn m3_extras(m: &Value) -> Value {
 #[test]
 fn an_emissive_layer_scales_by_its_multiplier_and_brightness() {
     // Off by default — a glow an animation switches on — must not glow at rest.
-    for ((multiply, brightness), want) in [((0.0, 1.0), 0.0), ((2.0, 0.5), 1.0), ((1.0, 1.0), 1.0)] {
+    for ((multiply, brightness), want) in [((0.0, 1.0), 0.0), ((2.0, 0.5), 1.0), ((1.0, 1.0), 1.0)]
+    {
         let mut spec = ModelSpec::quad();
         spec.materials[0].layers = vec![
-            ("diff", LayerSpec { color: Some([255, 255, 255, 255]), ..LayerSpec::default() }),
+            (
+                "diff",
+                LayerSpec {
+                    color: Some([255, 255, 255, 255]),
+                    ..LayerSpec::default()
+                },
+            ),
             (
                 "emis1",
                 LayerSpec {
@@ -290,18 +356,31 @@ fn an_emissive_layer_scales_by_its_multiplier_and_brightness() {
         ];
         let m = material(&spec);
         let got = m.get("emissiveFactor").map_or(0.0, |e| f(&e[1]));
-        assert!((got - want).abs() < 1e-6, "multiply {multiply} brightness {brightness}: {got}");
+        assert!(
+            (got - want).abs() < 1e-6,
+            "multiply {multiply} brightness {brightness}: {got}"
+        );
     }
 }
 
 #[test]
 fn additive_and_modulating_blends_are_named_in_extras() {
-    for (blend, name) in [(1, None), (2, Some("add")), (3, Some("alpha_add")), (4, Some("multiply")), (5, Some("multiply"))] {
+    for (blend, name) in [
+        (1, None),
+        (2, Some("add")),
+        (3, Some("alpha_add")),
+        (4, Some("multiply")),
+        (5, Some("multiply")),
+    ] {
         let mut spec = ModelSpec::quad();
         spec.materials[0].blend = blend;
         let m = material(&spec);
         assert_eq!(m["alphaMode"], "BLEND", "blend {blend}");
-        assert_eq!(m3_extras(&m).get("blend").and_then(Value::as_str), name, "blend {blend}");
+        assert_eq!(
+            m3_extras(&m).get("blend").and_then(Value::as_str),
+            name,
+            "blend {blend}"
+        );
     }
 }
 
@@ -309,10 +388,19 @@ fn additive_and_modulating_blends_are_named_in_extras() {
 fn an_additive_layer_switched_off_by_default_draws_nothing() {
     let mut spec = ModelSpec::quad();
     spec.materials[0].blend = 3;
-    spec.materials[0].layers =
-        vec![("diff", LayerSpec { color: Some([255, 255, 255, 255]), multiply: Some((0.0, 5)), ..LayerSpec::default() })];
+    spec.materials[0].layers = vec![(
+        "diff",
+        LayerSpec {
+            color: Some([255, 255, 255, 255]),
+            multiply: Some((0.0, 5)),
+            ..LayerSpec::default()
+        },
+    )];
     let base = material(&spec)["pbrMetallicRoughness"]["baseColorFactor"].clone();
-    assert!((0..4).all(|i| f(&base[i]) == 0.0), "an off additive layer must add nothing: {base}");
+    assert!(
+        (0..4).all(|i| f(&base[i]) == 0.0),
+        "an off additive layer must add nothing: {base}"
+    );
 }
 
 #[test]
@@ -321,20 +409,38 @@ fn an_animated_uv_offset_becomes_a_scroll_rate() {
     spec.materials[0].layers[0].1.uv_offset = Some(([0.0, 0.25], 99));
     spec.stcs = vec![StcSpec {
         name: "Stand_full".into(),
-        tracks: vec![(99, Track::Vec2(vec![(0, [0.0, 0.25]), (2000, [1.0, -3.75])]))],
+        tracks: vec![(
+            99,
+            Track::Vec2(vec![(0, [0.0, 0.25]), (2000, [1.0, -3.75])]),
+        )],
         ..StcSpec::default()
     }];
-    spec.sequences = vec![SeqSpec { name: "Stand".into(), stcs: vec![0] }];
+    spec.sequences = vec![SeqSpec {
+        name: "Stand".into(),
+        stcs: vec![0],
+    }];
     let scroll = m3_extras(&material(&spec))["uv_scroll"].clone();
-    assert!((f(&scroll[0]) - 0.5).abs() < 1e-5 && (f(&scroll[1]) + 2.0).abs() < 1e-5, "{scroll}");
+    assert!(
+        (f(&scroll[0]) - 0.5).abs() < 1e-5 && (f(&scroll[1]) + 2.0).abs() < 1e-5,
+        "{scroll}"
+    );
 
     // A layer that only drifts its mask (flowing water drawn as a still colour
     // under a moving alpha) scrolls the material just the same.
     let mut masked = spec.clone();
     masked.materials[0].layers[0].1.uv_offset = None;
-    masked.materials[0].layers.push(("alpha1", LayerSpec { uv_offset: Some(([0.0; 2], 99)), ..LayerSpec::default() }));
+    masked.materials[0].layers.push((
+        "alpha1",
+        LayerSpec {
+            uv_offset: Some(([0.0; 2], 99)),
+            ..LayerSpec::default()
+        },
+    ));
     let scroll = m3_extras(&material(&masked))["uv_scroll"].clone();
-    assert!((f(&scroll[0]) - 0.5).abs() < 1e-5, "alpha-layer scroll: {scroll}");
+    assert!(
+        (f(&scroll[0]) - 0.5).abs() < 1e-5,
+        "alpha-layer scroll: {scroll}"
+    );
 
     // A still offset scrolls nowhere: no extras.
     spec.stcs.clear();
@@ -374,7 +480,11 @@ fn madd_blend_mode_makes_the_material_transparent() {
             spec.madd_blends = vec![blend];
             spec.matms = vec![(12, 0)];
             let m = material(&spec);
-            assert_eq!(m["alphaMode"].as_str(), alpha_mode, "MADD v{v} blend {blend}");
+            assert_eq!(
+                m["alphaMode"].as_str(),
+                alpha_mode,
+                "MADD v{v} blend {blend}"
+            );
         }
     }
 }
@@ -410,7 +520,10 @@ fn a_region_drawn_with_a_splat_bake_material_is_skipped() {
     // drawn with it has nothing glTF can draw, and drawn anyway it is a flat
     // placeholder colour on the map. Only projections read it.
     let mut spec = ModelSpec::quad();
-    spec.splat_bakes = vec![LayerSpec { texture: "splat.dds".into(), ..LayerSpec::default() }];
+    spec.splat_bakes = vec![LayerSpec {
+        texture: "splat.dds".into(),
+        ..LayerSpec::default()
+    }];
     spec.matms = vec![(9, 0)];
     assert_eq!(convert(&spec).count("meshes"), 0);
 }
@@ -430,7 +543,14 @@ fn texture_dir(names: &[&str]) -> tempfile::TempDir {
     let sub = dir.path().join("Assets").join("Textures");
     std::fs::create_dir_all(&sub).unwrap();
     for name in names {
-        let img = image::RgbaImage::from_fn(8, 4, |x, y| image::Rgba([u8::try_from(x * 30).unwrap(), u8::try_from(y * 60).unwrap(), 0, 255]));
+        let img = image::RgbaImage::from_fn(8, 4, |x, y| {
+            image::Rgba([
+                u8::try_from(x * 30).unwrap(),
+                u8::try_from(y * 60).unwrap(),
+                0,
+                255,
+            ])
+        });
         img.save(sub.join(name)).unwrap();
     }
     std::fs::write(sub.join("notes.txt"), "not a texture").unwrap();
@@ -439,13 +559,21 @@ fn texture_dir(names: &[&str]) -> tempfile::TempDir {
 
 #[test]
 fn textures_are_found_by_stem_and_embedded_once() {
-    let dir = texture_dir(&["quad_diff.png", "quad_norm.png", "Quad_Emis.PNG", "quad_ao.png"]);
+    let dir = texture_dir(&[
+        "quad_diff.png",
+        "quad_norm.png",
+        "Quad_Emis.PNG",
+        "quad_ao.png",
+    ]);
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(cache.len(), 4);
     assert!(format!("{cache:?}").contains('4'));
 
     let mut spec = ModelSpec::quad();
-    let layer = |p: &str| LayerSpec { texture: p.into(), ..LayerSpec::default() };
+    let layer = |p: &str| LayerSpec {
+        texture: p.into(),
+        ..LayerSpec::default()
+    };
     spec.materials[0].layers = vec![
         ("diff", layer("Assets\\Textures\\quad_diff.dds")),
         ("norm", layer("assets/textures/QUAD_NORM.dds")),
@@ -456,8 +584,19 @@ fn textures_are_found_by_stem_and_embedded_once() {
     spec.materials.push(spec.materials[0].clone());
     spec.vertices.extend(spec.vertices.clone());
     spec.faces.extend([4, 5, 6]);
-    spec.regions.push(RegionSpec { first_vertex: 4, vertex_count: 4, first_face: 6, face_count: 3, uv_multiply: 16.0, ..RegionSpec::default() });
-    spec.batches.push(BatchSpec { region: 1, matm: 1, bone: -1 });
+    spec.regions.push(RegionSpec {
+        first_vertex: 4,
+        vertex_count: 4,
+        first_face: 6,
+        face_count: 3,
+        uv_multiply: 16.0,
+        ..RegionSpec::default()
+    });
+    spec.batches.push(BatchSpec {
+        region: 1,
+        matm: 1,
+        bone: -1,
+    });
     spec.matms.push((1, 1));
 
     let converter = Converter::new().textures(&cache).max_texture_size(4);
@@ -475,7 +614,12 @@ fn textures_are_found_by_stem_and_embedded_once() {
 
 #[test]
 fn madd_textures_embed_by_slot() {
-    let dir = texture_dir(&["hero_diff.png", "hero_norm.png", "hero_emis2.png", "hero_ao.png"]);
+    let dir = texture_dir(&[
+        "hero_diff.png",
+        "hero_norm.png",
+        "hero_emis2.png",
+        "hero_ao.png",
+    ]);
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let mut spec = ModelSpec::quad();
     spec.materials.clear();
@@ -502,7 +646,10 @@ fn textures_pass_through_unless_they_must_be_decoded() {
     let g = convert_with(&ModelSpec::quad(), &Converter::new().textures(&cache));
     assert_eq!(g.count("images"), 1);
     // …and skipped when a resize needs the pixels and they are not an image.
-    let g = convert_with(&ModelSpec::quad(), &Converter::new().textures(&cache).max_texture_size(64));
+    let g = convert_with(
+        &ModelSpec::quad(),
+        &Converter::new().textures(&cache).max_texture_size(64),
+    );
     assert_eq!(g.count("images"), 0);
 }
 
@@ -515,7 +662,10 @@ fn ktx2_without_toktx_falls_back_to_the_source_image() {
     // SAFETY: tests in this binary that read PATH do not run concurrently with
     // this one — none of them shells out.
     unsafe { std::env::set_var("PATH", "") };
-    let g = convert_with(&ModelSpec::quad(), &Converter::new().textures(&cache).ktx2(true));
+    let g = convert_with(
+        &ModelSpec::quad(),
+        &Converter::new().textures(&cache).ktx2(true),
+    );
     if let Some(p) = old {
         // SAFETY: as above.
         unsafe { std::env::set_var("PATH", p) };
@@ -593,11 +743,21 @@ fn degenerate_bind_pose_still_yields_matrices() {
 #[test]
 fn bone_tracks_become_gltf_animations() {
     let g = convert(&animated());
-    let names: Vec<&str> = g.json["animations"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = g.json["animations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names, ["Stand_full", "Loose"]);
     let stand = &g.json["animations"][0];
     assert_eq!(stand["channels"].as_array().unwrap().len(), 4);
-    let paths: Vec<&str> = stand["channels"].as_array().unwrap().iter().map(|c| c["target"]["path"].as_str().unwrap()).collect();
+    let paths: Vec<&str> = stand["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["target"]["path"].as_str().unwrap())
+        .collect();
     assert_eq!(paths, ["translation", "rotation", "scale", "translation"]);
     // The duplicate 500 ms key keeps the later sample; 4 keys → 3 times.
     let input = &g.json["accessors"][at(&stand["samplers"][0]["input"])];
@@ -621,11 +781,17 @@ fn companion_animation_files_contribute_clips() {
             tracks: vec![(11, Track::Vec3(vec![(0, [0.0; 3]), (33, [1.0; 3])]))],
             ..StcSpec::default()
         }],
-        sequences: vec![SeqSpec { name: "Walk".into(), stcs: vec![0] }],
+        sequences: vec![SeqSpec {
+            name: "Walk".into(),
+            stcs: vec![0],
+        }],
         ..ModelSpec::default()
     }
     .build();
-    let glb = Converter::new().animations(&m3a).convert(&base.build()).unwrap();
+    let glb = Converter::new()
+        .animations(&m3a)
+        .convert(&base.build())
+        .unwrap();
     assert_eq!(glb.stats.animations, 1);
     let g = check_glb(&glb.bytes).unwrap();
     assert_eq!(g.json["animations"][0]["name"], "Walk");
@@ -635,7 +801,11 @@ fn companion_animation_files_contribute_clips() {
 fn a_broken_animation_file_names_its_index() {
     let base = ModelSpec::quad().build();
     let ok = ModelSpec::default().build();
-    let err = Converter::new().animations(&ok).animations(b"nope").convert(&base).unwrap_err();
+    let err = Converter::new()
+        .animations(&ok)
+        .animations(b"nope")
+        .convert(&base)
+        .unwrap_err();
     assert!(matches!(err, Error::Animation { index: 1, .. }), "{err}");
     assert!(err.to_string().starts_with("animation file #1"));
 }
@@ -674,7 +844,11 @@ fn older_particle_versions_are_widened_and_ancient_ones_skipped() {
         let mut spec = with_effects();
         spec.par_version = v;
         let g = convert(&spec);
-        let n = g.extras("m3fx").iter().filter(|x| x["kind"] == "particle").count();
+        let n = g
+            .extras("m3fx")
+            .iter()
+            .filter(|x| x["kind"] == "particle")
+            .count();
         assert_eq!(n, expect, "PAR_ v{v}");
     }
 }
@@ -691,7 +865,10 @@ fn unsupported_light_and_projection_versions_are_skipped() {
 #[test]
 fn attachments_name_their_bone_node() {
     let mut spec = ModelSpec {
-        bones: vec![BoneSpec::named("Ref_Head", -1), BoneSpec::named("Vol_Target", 0)],
+        bones: vec![
+            BoneSpec::named("Ref_Head", -1),
+            BoneSpec::named("Vol_Target", 0),
+        ],
         attachments: vec![
             ("Ref_Head".into(), 0),
             ("Ref_Target".into(), 1),
@@ -744,10 +921,14 @@ fn convert_file_round_trips_through_disk() {
     assert_eq!(stats.meshes, 1);
     check_glb(&std::fs::read(&output).unwrap()).unwrap();
 
-    let err = Converter::new().convert_file(dir.path().join("missing.m3"), &output).unwrap_err();
+    let err = Converter::new()
+        .convert_file(dir.path().join("missing.m3"), &output)
+        .unwrap_err();
     assert!(matches!(err, Error::Io { .. }));
     assert!(err.to_string().contains("missing.m3"));
-    let err = Converter::new().convert_file(&input, dir.path().join("no/such/dir/out.glb")).unwrap_err();
+    let err = Converter::new()
+        .convert_file(&input, dir.path().join("no/such/dir/out.glb"))
+        .unwrap_err();
     assert!(matches!(err, Error::Io { .. }));
 }
 
@@ -763,7 +944,10 @@ fn garbage_is_a_model_error() {
 #[test]
 fn every_magic_spelling_parses() {
     for magic in [*b"43DM", *b"33DM", *b"23DM", *b"MD34", *b"MD33", *b"MD32"] {
-        let spec = ModelSpec { magic, ..ModelSpec::quad() };
+        let spec = ModelSpec {
+            magic,
+            ..ModelSpec::quad()
+        };
         let m3 = spec.build();
         let file = m3_to_glb::parse(&m3).unwrap();
         assert_eq!(file.mesh_count(), 1);
@@ -788,7 +972,11 @@ fn textures_missing_from_the_index_are_left_out() {
     assert_eq!(g.count("images"), 0);
     // The diffuse *path* is set, so the base colour stays white rather than
     // the black used for a material with no albedo source at all.
-    assert!(g.json["materials"][0]["pbrMetallicRoughness"].get("baseColorFactor").is_none());
+    assert!(
+        g.json["materials"][0]["pbrMetallicRoughness"]
+            .get("baseColorFactor")
+            .is_none()
+    );
     assert!(TextureCache::empty().find("x_diff.dds").is_none());
     assert!(TextureCache::empty().is_empty());
 }
@@ -798,7 +986,10 @@ fn small_textures_pass_through_a_resize_limit_untouched() {
     let dir = texture_dir(&["quad_diff.png"]);
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let raw = std::fs::read(dir.path().join("Assets/Textures/quad_diff.png")).unwrap();
-    let g = convert_with(&ModelSpec::quad(), &Converter::new().textures(&cache).max_texture_size(64));
+    let g = convert_with(
+        &ModelSpec::quad(),
+        &Converter::new().textures(&cache).max_texture_size(64),
+    );
     let view = &g.json["bufferViews"][at(&g.json["images"][0]["bufferView"])];
     assert_eq!(at(&view["byteLength"]), raw.len());
 }
@@ -806,11 +997,17 @@ fn small_textures_pass_through_a_resize_limit_untouched() {
 #[test]
 fn image_mime_types_follow_the_extension() {
     let dir = tempfile::tempdir().unwrap();
-    for f in ["a.dds", "b.TGA", "c.bmp", "d.jpg", "e.jpeg", "f.PNG", "g.txt"] {
+    for f in [
+        "a.dds", "b.TGA", "c.bmp", "d.jpg", "e.jpeg", "f.PNG", "g.txt",
+    ] {
         std::fs::write(dir.path().join(f), b"").unwrap();
     }
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
-    assert_eq!(cache.len(), 6, "every image extension, in any case — not .txt");
+    assert_eq!(
+        cache.len(),
+        6,
+        "every image extension, in any case — not .txt"
+    );
     let mime = |p: &str| cache.find_with_mime(p).map(|(_, m)| m);
     assert_eq!(mime("a.dds"), Some("image/vnd-ms.dds"));
     assert_eq!(mime("B.tga"), Some("image/x-tga"));
@@ -827,12 +1024,21 @@ fn emitter_curves_carry_burst_timing() {
     let mut spec = with_effects();
     // A rate that switches on 100 ms into the sequence, and a burst count
     // stored as an unsigned 16-bit track.
-    spec.stcs[0].tracks[0] = (77, Track::Real(vec![(0, 0.0), (100, 0.0), (200, 5.0), (300, 0.0)]));
+    spec.stcs[0].tracks[0] = (
+        77,
+        Track::Real(vec![(0, 0.0), (100, 0.0), (200, 5.0), (300, 0.0)]),
+    );
     // A light whose intensity curve never rises contributes no peak.
     spec.stcs[0].tracks[3] = (80, Track::Real(vec![(0, 0.0), (10, 0.0)]));
     spec.particles[0].emit_count.header.id = 81;
     // A textureless effect material whose colour lives in the diffuse layer.
-    spec.materials[0].layers.push(("diff", LayerSpec { color: Some([9, 9, 9, 255]), ..LayerSpec::default() }));
+    spec.materials[0].layers.push((
+        "diff",
+        LayerSpec {
+            color: Some([9, 9, 9, 255]),
+            ..LayerSpec::default()
+        },
+    ));
     let g = convert(&spec);
     let fx = g.extras("m3fx");
     let spawn = &fx[0]["spawn"];
@@ -847,11 +1053,20 @@ fn effect_textures_are_embedded_and_referenced() {
     let dir = texture_dir(&["fx_diff.png", "glow_diff.png"]);
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let mut spec = with_effects();
-    spec.materials[0].layers = vec![("diff", LayerSpec { texture: "glow_diff.dds".into(), ..LayerSpec::default() })];
+    spec.materials[0].layers = vec![(
+        "diff",
+        LayerSpec {
+            texture: "glow_diff.dds".into(),
+            ..LayerSpec::default()
+        },
+    )];
     let g = convert_with(&spec, &Converter::new().textures(&cache));
     let fx = g.extras("m3fx");
     assert_eq!(fx[0]["texture"], "#Texture0");
-    assert_eq!(fx[2]["texture"], "#Texture1", "the MADD diffuse behind the composite");
+    assert_eq!(
+        fx[2]["texture"], "#Texture1",
+        "the MADD diffuse behind the composite"
+    );
     assert_eq!(g.count("images"), 2);
 }
 
@@ -865,8 +1080,20 @@ fn an_effect_with_a_distinct_glow_carries_it_as_its_emissive_layer() {
         let mut spec = with_effects();
         spec.materials[0].emis_blend = emis_blend;
         spec.materials[0].layers = vec![
-            ("diff", LayerSpec { texture: "shard_diff.dds".into(), ..LayerSpec::default() }),
-            ("emis1", LayerSpec { texture: "shard_emis.dds".into(), ..LayerSpec::default() }),
+            (
+                "diff",
+                LayerSpec {
+                    texture: "shard_diff.dds".into(),
+                    ..LayerSpec::default()
+                },
+            ),
+            (
+                "emis1",
+                LayerSpec {
+                    texture: "shard_emis.dds".into(),
+                    ..LayerSpec::default()
+                },
+            ),
         ];
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = &g.extras("m3fx")[0];
@@ -884,7 +1111,15 @@ fn a_glow_that_is_the_diffuse_or_the_only_bitmap_is_not_written_twice() {
         let mut spec = with_effects();
         spec.materials[0].layers = layers
             .iter()
-            .map(|l| (*l, LayerSpec { texture: "flame_diff.dds".into(), ..LayerSpec::default() }))
+            .map(|l| {
+                (
+                    *l,
+                    LayerSpec {
+                        texture: "flame_diff.dds".into(),
+                        ..LayerSpec::default()
+                    },
+                )
+            })
             .collect();
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = &g.extras("m3fx")[0];
@@ -901,8 +1136,20 @@ fn a_colour_drawn_through_a_glow_samples_the_glow() {
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let mut spec = with_effects();
     spec.materials[0].layers = vec![
-        ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
-        ("emis1", LayerSpec { texture: "flame_emis.dds".into(), ..LayerSpec::default() }),
+        (
+            "diff",
+            LayerSpec {
+                color: Some([0, 128, 255, 255]),
+                ..LayerSpec::default()
+            },
+        ),
+        (
+            "emis1",
+            LayerSpec {
+                texture: "flame_emis.dds".into(),
+                ..LayerSpec::default()
+            },
+        ),
     ];
     let g = convert_with(&spec, &Converter::new().textures(&cache));
     let fx = &g.extras("m3fx")[0];
@@ -919,8 +1166,21 @@ fn a_colour_cut_by_a_mask_is_the_colour_and_the_mask() {
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let mut spec = with_effects();
     spec.materials[0].layers = vec![
-        ("diff", LayerSpec { color: Some([0, 128, 255, 255]), ..LayerSpec::default() }),
-        ("alpha1", LayerSpec { texture: "spark_mask.dds".into(), channels: 3, ..LayerSpec::default() }),
+        (
+            "diff",
+            LayerSpec {
+                color: Some([0, 128, 255, 255]),
+                ..LayerSpec::default()
+            },
+        ),
+        (
+            "alpha1",
+            LayerSpec {
+                texture: "spark_mask.dds".into(),
+                channels: 3,
+                ..LayerSpec::default()
+            },
+        ),
     ];
     let g = convert_with(&spec, &Converter::new().textures(&cache));
     let fx = &g.extras("m3fx")[0];
@@ -932,30 +1192,69 @@ fn a_colour_cut_by_a_mask_is_the_colour_and_the_mask() {
 
 /// The effect node of `kind` (`"particle"`, `"decal"`, …) at `n` among its kind.
 fn fx_of<'g>(g: &'g GlbSummary, kind: &str, n: usize) -> &'g Value {
-    g.extras("m3fx").into_iter().filter(|fx| fx["kind"] == kind).nth(n).expect("no such effect")
+    g.extras("m3fx")
+        .into_iter()
+        .filter(|fx| fx["kind"] == kind)
+        .nth(n)
+        .expect("no such effect")
 }
 
 #[test]
 fn an_alpha_mask_travels_beside_the_picture_with_its_channel_and_coordinates() {
     // A ground ring is a tiling picture cut to shape by a mask: its own bitmap,
     // read from one channel, on its own tiling and its own coordinates.
-    for (channels, name) in [(0, "r"), (1, "a"), (2, "a"), (3, "r"), (4, "g"), (5, "b"), (77, "a")] {
+    for (channels, name) in [
+        (0, "r"),
+        (1, "a"),
+        (2, "a"),
+        (3, "r"),
+        (4, "g"),
+        (5, "b"),
+        (77, "a"),
+    ] {
         let dir = texture_dir(&["ice_diff.png", "ring_mask.png"]);
         let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
         let mut spec = with_effects();
         spec.materials[0].layers = vec![
-            ("diff", LayerSpec { texture: "ice_diff.dds".into(), uv_tiling: [1.5, 3.0], uv_source: 6, ..LayerSpec::default() }),
-            ("alpha1", LayerSpec { texture: "ring_mask.dds".into(), channels, uv_tiling: [1.0, 2.0], ..LayerSpec::default() }),
+            (
+                "diff",
+                LayerSpec {
+                    texture: "ice_diff.dds".into(),
+                    uv_tiling: [1.5, 3.0],
+                    uv_source: 6,
+                    ..LayerSpec::default()
+                },
+            ),
+            (
+                "alpha1",
+                LayerSpec {
+                    texture: "ring_mask.dds".into(),
+                    channels,
+                    uv_tiling: [1.0, 2.0],
+                    ..LayerSpec::default()
+                },
+            ),
         ];
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = fx_of(&g, "particle", 0);
         assert_eq!(fx["texture"], "#Texture0", "{fx}");
-        assert_eq!((f(&fx["uv"]["tiling"][0]), f(&fx["uv"]["tiling"][1])), (1.5, 3.0), "{fx}");
-        assert_eq!(fx["uv"]["cell"], true, "the picture reads the flipbook cell: {fx}");
+        assert_eq!(
+            (f(&fx["uv"]["tiling"][0]), f(&fx["uv"]["tiling"][1])),
+            (1.5, 3.0),
+            "{fx}"
+        );
+        assert_eq!(
+            fx["uv"]["cell"], true,
+            "the picture reads the flipbook cell: {fx}"
+        );
         let mask = &fx["mask"];
         assert_eq!(mask["texture"], "#Texture1", "{fx}");
         assert_eq!(mask["channel"], name, "channels {channels}");
-        assert_eq!((f(&mask["tiling"][0]), f(&mask["tiling"][1])), (1.0, 2.0), "{fx}");
+        assert_eq!(
+            (f(&mask["tiling"][0]), f(&mask["tiling"][1])),
+            (1.0, 2.0),
+            "{fx}"
+        );
         assert_eq!(mask["cell"], false, "the mask reads the whole quad: {fx}");
     }
 }
@@ -970,17 +1269,38 @@ fn a_mask_that_is_the_pictures_own_alpha_is_not_written_twice() {
         let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
         let mut spec = with_effects();
         spec.materials[0].layers = vec![
-            ("diff", LayerSpec { texture: "flake_diff.dds".into(), ..LayerSpec::default() }),
-            ("alpha1", LayerSpec { texture: "flake_diff.dds".into(), channels, ..LayerSpec::default() }),
+            (
+                "diff",
+                LayerSpec {
+                    texture: "flake_diff.dds".into(),
+                    ..LayerSpec::default()
+                },
+            ),
+            (
+                "alpha1",
+                LayerSpec {
+                    texture: "flake_diff.dds".into(),
+                    channels,
+                    ..LayerSpec::default()
+                },
+            ),
         ];
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = fx_of(&g, "particle", 0);
-        assert_eq!(fx.get("mask").is_some(), masked, "channels {channels}: {fx}");
+        assert_eq!(
+            fx.get("mask").is_some(),
+            masked,
+            "channels {channels}: {fx}"
+        );
         assert_eq!(fx["texture_alpha"], !masked, "channels {channels}: {fx}");
         if masked {
             assert_eq!(fx["mask"]["texture"], "#Texture0", "{fx}");
         }
-        assert_eq!(g.count("images"), 1, "one image, however many layers name it");
+        assert_eq!(
+            g.count("images"),
+            1,
+            "one image, however many layers name it"
+        );
     }
 }
 
@@ -993,8 +1313,14 @@ fn a_picture_is_drawn_with_its_alpha_only_when_its_layer_reads_it() {
         let dir = texture_dir(&["ice_diff.png"]);
         let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
         let mut spec = with_effects();
-        spec.materials[0].layers =
-            vec![("diff", LayerSpec { texture: "ice_diff.dds".into(), channels, ..LayerSpec::default() })];
+        spec.materials[0].layers = vec![(
+            "diff",
+            LayerSpec {
+                texture: "ice_diff.dds".into(),
+                channels,
+                ..LayerSpec::default()
+            },
+        )];
         let g = convert_with(&spec, &Converter::new().textures(&cache));
         let fx = fx_of(&g, "particle", 0);
         assert_eq!(fx["texture_alpha"], with_alpha, "channels {channels}: {fx}");
@@ -1008,12 +1334,18 @@ fn a_terrain_splat_projection_draws_its_bake_diffuse() {
     let dir = texture_dir(&["shadow_splat.png"]);
     let cache = TextureCache::build(dir.path().to_str().unwrap()).unwrap();
     let mut spec = with_effects();
-    spec.splat_bakes = vec![LayerSpec { texture: "shadow_splat.dds".into(), ..LayerSpec::default() }];
+    spec.splat_bakes = vec![LayerSpec {
+        texture: "shadow_splat.dds".into(),
+        ..LayerSpec::default()
+    }];
     spec.matms.push((9, 0));
     spec.projections[0].material_reference_index = u32::try_from(spec.matms.len() - 1).unwrap();
     let g = convert_with(&spec, &Converter::new().textures(&cache));
     let decal = fx_of(&g, "decal", 0);
     assert_eq!(decal["texture"], "#Texture0", "{decal}");
-    assert_eq!(decal["texture_alpha"], true, "a splat's diffuse carries its own alpha: {decal}");
+    assert_eq!(
+        decal["texture_alpha"], true,
+        "a splat's diffuse carries its own alpha: {decal}"
+    );
     assert_eq!(decal["blend"], "blend", "{decal}");
 }
