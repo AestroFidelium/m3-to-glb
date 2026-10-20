@@ -138,3 +138,18 @@ fn failures_exit_non_zero_with_a_message() {
         Some(2)
     );
 }
+
+#[test]
+fn effects_are_exported_unless_no_fx() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("fx.m3"), with_effects().build()).unwrap();
+    for (args, effects) in [
+        (&["fx.m3", "-o", "on.glb"][..], 3),
+        (&["fx.m3", "-o", "off.glb", "--no-fx"], 0),
+    ] {
+        let out = run(args, tmp.path());
+        assert!(out.status.success(), "{args:?}: {}", text(&out.stderr));
+        let g = check_glb(&std::fs::read(tmp.path().join(args[2])).unwrap()).unwrap();
+        assert_eq!(g.extras("m3fx").len(), effects, "{args:?}");
+    }
+}

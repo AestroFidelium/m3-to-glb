@@ -836,6 +836,38 @@ fn effects_can_be_turned_off() {
     assert!(g.extras("m3fx").is_empty());
     let g = convert_with(&spec, &Converter::new().options(PackOptions::default()));
     assert!(g.extras("m3fx").is_empty());
+    // …and back on, over options that had them off.
+    let on = Converter::new()
+        .options(PackOptions::default())
+        .effects(true);
+    assert_eq!(convert_with(&spec, &on).extras("m3fx").len(), 3);
+}
+
+#[test]
+fn pack_writes_what_the_converter_writes() {
+    // `glb::pack` is the lower-level entry point; it must not drift from the
+    // file `Converter` produces from the same inputs.
+    let options = PackOptions {
+        fx: true,
+        ..PackOptions::default()
+    };
+    for spec in [
+        ModelSpec::quad(),
+        skinned_quad(),
+        animated(),
+        with_effects(),
+    ] {
+        let bytes = spec.build();
+        let m3 = m3_to_glb::parse(&bytes).expect("parse");
+        let meshes = m3_to_glb::processor::convert_all_meshes(&m3).expect("meshes");
+        let packed =
+            m3_to_glb::glb::pack(&meshes, &TextureCache::empty(), &m3, &[], options).expect("pack");
+        let converted = Converter::new()
+            .options(options)
+            .convert(&bytes)
+            .expect("convert");
+        assert_eq!(packed, converted.bytes);
+    }
 }
 
 #[test]
