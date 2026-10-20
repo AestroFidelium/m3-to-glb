@@ -47,9 +47,9 @@
           # nixpkgs' fetchurl User-Agent (`curl/X Nixpkgs/Y`) — and crates.io now
           # answers 403 to any `curl/*` UA, so every crate fails to fetch.
           # `cargoHash` goes through `fetchCargoVendor`, which pulls from the
-          # `static.crates.io` CDN instead. Re-run with `cargoHash = "sha256-RAqspCxyUgQdMSJZ583cHoSVvS412wtEkGSfxUq37Oo=";` and copy
+          # `static.crates.io` CDN instead. Re-run with `cargoHash = pkgs.lib.fakeHash;` and copy
           # the reported hash whenever Cargo.lock changes.
-          cargoHash = "sha256-RAqspCxyUgQdMSJZ583cHoSVvS412wtEkGSfxUq37Oo=";
+          cargoHash = "sha256-CAXyi0iGbk4ehliv6mxY+/HpB5cxu0TP0Jwf/QEZ5qk=";
 
           # `.cargo/config.toml` pins clang + mold as the linker.
           # `installShellFiles` ships the completions the binary prints with
