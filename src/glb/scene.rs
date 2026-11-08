@@ -19,6 +19,88 @@ pub(super) struct Scene {
     mesh_nodes: Vec<usize>,
 }
 
+type Mat4 = [[f32; 4]; 4];
+
+/// A bone's local rest transform and world bind matrix in glTF coordinates.
+///
+/// M3 `IREF` entries are authoritative inverse world bind matrices. The BONE
+/// defaults usually describe the same pose, but differ enough on game models
+/// to deform a mesh incorrectly once an animation moves the skeleton.
+pub(super) struct BindPose {
+    local: Vec<([f32; 3], [f32; 4], [f32; 3])>,
+    world: Vec<Mat4>,
+}
+
+impl BindPose {
+    pub(super) fn from_m3(m3: &M3File<'_>, bones: &[Bone]) -> Self {
+        let fallback = Self::from_bones(bones);
+        let Ok(irefs) = m3.bone_rests() else {
+            return fallback;
+        };
+        if irefs.len() != bones.len() {
+            debug!(
+                "IREF count {} does not match BONE count {}; using BONE defaults",
+                irefs.len(),
+                bones.len()
+            );
+            return fallback;
+        }
+
+        let mut world = Vec::with_capacity(bones.len());
+        for (index, iref) in irefs.iter().enumerate() {
+            let Some(m3_world) = try_invert_4x4(&matrix44_to_mat4(&iref.matrix)) else {
+                debug!("IREF[{index}] is singular; using BONE defaults");
+                return fallback;
+            };
+            // Coordinates are converted globally: p_gltf = C * p_m3.
+            // Children consequently retain their M3 local transforms.
+            world.push(mul_4x4(&zup_to_yup_matrix(), &m3_world));
+        }
+
+        let mut local = Vec::with_capacity(bones.len());
+        for (index, bone) in bones.iter().enumerate() {
+            let local_matrix = match bone.parent_index(index) {
+                Some(parent) => {
+                    let Some(parent_inverse) = try_invert_4x4(&world[parent]) else {
+                        debug!(
+                            "IREF-derived parent matrix {parent} is singular; using BONE defaults"
+                        );
+                        return fallback;
+                    };
+                    mul_4x4(&parent_inverse, &world[index])
+                }
+                None => world[index],
+            };
+            let Some(trs) = mat4_to_trs(&local_matrix) else {
+                debug!(
+                    "IREF-derived local matrix {index} cannot be decomposed; using BONE defaults"
+                );
+                return fallback;
+            };
+            local.push(trs);
+        }
+
+        debug!("using {} IREF inverse bind matrices", irefs.len());
+        Self { local, world }
+    }
+
+    fn from_bones(bones: &[Bone]) -> Self {
+        let mut world = Vec::with_capacity(bones.len());
+        let mut local = Vec::with_capacity(bones.len());
+        for (index, bone) in bones.iter().enumerate() {
+            let trs = bone_trs(bone, index);
+            let matrix = trs_to_mat4(trs.0, trs.1, trs.2);
+            let world_matrix = match bone.parent_index(index) {
+                Some(parent) => mul_4x4(&world[parent], &matrix),
+                None => matrix,
+            };
+            local.push(trs);
+            world.push(world_matrix);
+        }
+        Self { local, world }
+    }
+}
+
 /// A bone's rest translation, rotation and scale. Root bones carry the
 /// Z-up → Y-up bake: `T' = R·T`, `Q' = R ⊗ Q`.
 fn bone_trs(bone: &Bone, index: usize) -> ([f32; 3], [f32; 4], [f32; 3]) {
@@ -41,7 +123,7 @@ impl Scene {
     /// One node per bone, parented by the bone hierarchy. Attachment points
     /// (`Ref_Head`, …) are not nodes of their own — each names a bone that is
     /// already emitted, so it is written into that bone node's `extras`.
-    pub fn with_bones(m3: &M3File<'_>, bones: &[Bone]) -> Self {
+    pub fn with_bones(m3: &M3File<'_>, bones: &[Bone], bind_pose: &BindPose) -> Self {
         let mut attach_extras: ahash::AHashMap<usize, String> = ahash::AHashMap::new();
         let attachments = attach::collect(m3, bones.len());
         for a in &attachments {
@@ -65,7 +147,7 @@ impl Scene {
             .enumerate()
             .map(|(bi, bone)| {
                 let name = m3.read_char(&bone.name).unwrap_or("");
-                let (t, r, s) = bone_trs(bone, bi);
+                let (t, r, s) = bind_pose.local[bi];
                 // M3 rest quaternions are only approximately unit length, and
                 // the Z-up bake can push a component past ±1 (1.0000001 on
                 // War3_Kelthuzad's root), which glTF rejects.
@@ -165,14 +247,10 @@ impl Scene {
 }
 
 /// The skin over every bone, with its inverse bind matrices in the buffer.
-///
-/// m3studio uses the file's `IREF` matrices as Blender bone-roll orientation,
-/// not as glTF IBMs (`inverse(world bind matrix)`), so the world bind pose is
-/// computed by walking the hierarchy and each matrix inverted.
-pub(super) fn skin(bufs: &mut Buffers, bones: &[Bone]) -> GltfSkin {
-    let mut ibm_bytes: Vec<u8> = Vec::with_capacity(bones.len() * 64);
-    for world in compute_world_matrices(bones) {
-        for col in &invert_4x4(&world) {
+pub(super) fn skin(bufs: &mut Buffers, bind_pose: &BindPose) -> GltfSkin {
+    let mut ibm_bytes: Vec<u8> = Vec::with_capacity(bind_pose.world.len() * 64);
+    for world in &bind_pose.world {
+        for col in &invert_4x4(world) {
             ibm_bytes.extend_from_slice(bytemuck::cast_slice(col));
         }
     }
@@ -181,7 +259,7 @@ pub(super) fn skin(bufs: &mut Buffers, bones: &[Bone]) -> GltfSkin {
         buffer_view,
         byte_offset: 0,
         component_type: FLOAT,
-        count: bones.len(),
+        count: bind_pose.world.len(),
         element_type: "MAT4",
         normalized: false,
         min: None,
@@ -190,7 +268,7 @@ pub(super) fn skin(bufs: &mut Buffers, bones: &[Bone]) -> GltfSkin {
     // No `skeleton`: it is optional, and naming one trips
     // SKIN_SKELETON_INVALID when there are multiple bone roots.
     GltfSkin {
-        joints: (0..bones.len()).collect(),
+        joints: (0..bind_pose.world.len()).collect(),
         inverse_bind_matrices: Some(ibm),
     }
 }
@@ -203,18 +281,91 @@ pub(super) fn skin(bufs: &mut Buffers, bones: &[Bone]) -> GltfSkin {
 ///
 /// Root bones get the same Z-up → Y-up rotation as their node TRS
 /// (`bone_trs`), so the IBMs match the rotated rest pose.
-fn compute_world_matrices(bones: &[Bone]) -> Vec<[[f32; 4]; 4]> {
-    let mut world = Vec::with_capacity(bones.len());
-    for (i, bone) in bones.iter().enumerate() {
-        let (t, q, s) = bone_trs(bone, i);
-        let local = trs_to_mat4(t, q, s);
-        let m = match bone.parent_index(i) {
-            Some(p) => mul_4x4(&world[p], &local),
-            None => local,
-        };
-        world.push(m);
+fn matrix44_to_mat4(matrix: &crate::m3::structures::Matrix44) -> Mat4 {
+    [
+        [matrix.x.x, matrix.x.y, matrix.x.z, matrix.x.w],
+        [matrix.y.x, matrix.y.y, matrix.y.z, matrix.y.w],
+        [matrix.z.x, matrix.z.y, matrix.z.z, matrix.z.w],
+        [matrix.w.x, matrix.w.y, matrix.w.z, matrix.w.w],
+    ]
+}
+
+fn zup_to_yup_matrix() -> Mat4 {
+    trs_to_mat4([0.0; 3], quat::Z_UP_TO_Y_UP, [1.0; 3])
+}
+
+fn mat4_to_trs(matrix: &Mat4) -> Option<([f32; 3], [f32; 4], [f32; 3])> {
+    let mut scale = [0.0; 3];
+    let mut rotation = [[0.0; 3]; 3];
+    for column in 0..3 {
+        let c = matrix[column];
+        let length = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        if length <= 1e-8 {
+            return None;
+        }
+        scale[column] = length;
+        rotation[column] = [c[0] / length, c[1] / length, c[2] / length];
     }
-    world
+    let determinant = dot3(rotation[0], cross3(rotation[1], rotation[2]));
+    if determinant < 0.0 {
+        scale[0] = -scale[0];
+        rotation[0] = [-rotation[0][0], -rotation[0][1], -rotation[0][2]];
+    }
+    let quaternion = quat::normalize_and_clamp(rotation_to_quat(rotation));
+    Some((
+        [matrix[3][0], matrix[3][1], matrix[3][2]],
+        quaternion,
+        scale,
+    ))
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn rotation_to_quat(m: [[f32; 3]; 3]) -> [f32; 4] {
+    let trace = m[0][0] + m[1][1] + m[2][2];
+    if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        [
+            (m[1][2] - m[2][1]) / s,
+            (m[2][0] - m[0][2]) / s,
+            (m[0][1] - m[1][0]) / s,
+            0.25 * s,
+        ]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [
+            0.25 * s,
+            (m[1][0] + m[0][1]) / s,
+            (m[2][0] + m[0][2]) / s,
+            (m[1][2] - m[2][1]) / s,
+        ]
+    } else if m[1][1] > m[2][2] {
+        let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [
+            (m[1][0] + m[0][1]) / s,
+            0.25 * s,
+            (m[2][1] + m[1][2]) / s,
+            (m[2][0] - m[0][2]) / s,
+        ]
+    } else {
+        let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [
+            (m[2][0] + m[0][2]) / s,
+            (m[2][1] + m[1][2]) / s,
+            0.25 * s,
+            (m[0][1] - m[1][0]) / s,
+        ]
+    }
 }
 
 #[expect(
@@ -262,6 +413,13 @@ fn mul_4x4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
                 .fold(0.0, |s, (a_col, bk)| s + a_col[r] * bk)
         })
     })
+}
+
+fn try_invert_4x4(m: &Mat4) -> Option<Mat4> {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2])
+        - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2])
+        + m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+    (det.abs() >= 1e-12).then(|| invert_4x4(m))
 }
 
 /// General 4×4 matrix inversion via cofactor expansion. Operates on column-major
