@@ -290,10 +290,11 @@ fn build_glb_content(
         Vec::new()
     };
 
-    let mut scene = Scene::with_bones(m3, &bones);
+    let bind_pose = scene::BindPose::from_m3(m3, &bones);
+    let mut scene = Scene::with_bones(m3, &bones, &bind_pose);
     scene.add_effects(&fx_items, &fx_materials, &fx_curves);
     let skins: Vec<GltfSkin> = if any_skinned && !bones.is_empty() {
-        vec![scene::skin(&mut bufs, &bones)]
+        vec![scene::skin(&mut bufs, &bind_pose)]
     } else {
         Vec::new()
     };
